@@ -1,0 +1,113 @@
+# Build Queue
+
+One item per Claude Code session, in order. Each has a definition of done you
+can verify without reading code.
+
+**Start every session with:**
+```
+Read PROGRESS.md, then specs/NN-name.md. Plan first, do not write code yet.
+```
+
+**End every session with:** `/checkpoint`
+
+---
+
+## Phase A: Foundation
+
+- [ ] **A1. Data model** (`specs/00-data-model.md`)
+  Done: `jobengine.db init` creates the schema idempotently, `tests/test_db.py`
+  passes including the `first_seen_at` immutability test.
+
+- [ ] **A2. Bullet bank schema + your bank** (`specs/01-bullet-bank.md`)
+  Done: `bank validate` reports zero errors and prints a per-profile count.
+  Longest manual step. Budget two hours. Do not let an agent speed-run it.
+
+- [ ] **A3. Slop linter** (`specs/02-slop-linter.md`)
+  Done: flags a bad fixture, passes a real bank bullet, PostToolUse hook stops
+  erroring.
+
+- [ ] **A4. Docx renderer** (`specs/03-renderer.md`)
+  Done: golden test passes on font, sizes, spacing, tabs, margins.
+
+## Phase B: Ingestion
+
+Start B1 and B2 as soon as A1 is green, even if nothing downstream exists.
+Snapshot history cannot be backfilled.
+
+- [ ] **B1. ATS clients + slug registry** (`specs/04-sources.md`)
+  Done: `sources.sync` populates `companies`, reports OK and dead counts.
+
+- [ ] **B2. Fetch and diff**
+  Done: two runs a day apart show a non-zero `first_seen_at` delta.
+  **Put this on a schedule the day it works.**
+
+- [ ] **B3. Deterministic filters + profile routing**
+  Done: a full fetch reduces to 300-500 candidates/day and you agree with the
+  survivors on inspection.
+
+## Phase C: Local intelligence
+
+- [ ] **C1. LLM router + Ollama provider** (`specs/05-model-routing.md`)
+  Done: `llm.check` reports reachable local, and exits non-zero if any
+  Anthropic provider would be constructed under default config.
+
+- [ ] **C2. Eval fixture set** (`specs/07-model-eval.md`)
+  Done: 50 JDs labelled by you, 15 with hand-extracted keywords, in
+  `human_labels`. This is your hour, not Claude Code's.
+
+- [ ] **C3. Keyword extraction + corpus**
+  Done: eval Task 2 passes (recall >= 0.85, precision >= 0.70).
+
+- [ ] **C4. Relevance pre-filter** (`specs/06-relevance-filter.md`)
+  Done: eval Task 1 passes (rho >= 0.70, top-30 overlap >= 0.75).
+
+## Phase D: The rubric
+
+- [ ] **D1. Rubric rules R001-R013** (`specs/08-rubric.md`)
+  Done: scoring your current resume against 3 real JDs gives coverage numbers
+  you agree with by hand.
+
+- [ ] **D2. Front-loading + line measurement from PDF geometry**
+  Done: `rubric explain R002` prints real y-coordinates.
+
+- [ ] **D3. Patch ladder P0-P2** (deterministic only)
+  Done: at least one real deficit closes with zero model calls.
+
+- [ ] **D4. Patch tier P3 + bank variant writeback**
+  Done: a P3 rephrase passes the linter, keeps its parent bank id, and is
+  written back as a variant.
+
+## Phase E: Base resumes
+
+- [ ] **E1. Profile config + `profiles brief`** (`specs/09-base-resumes.md`)
+- [ ] **E2. Generate all 3 base resumes** (interactive session, not automated)
+  Done: each passes the full rubric at coverage >= 0.80.
+
+## Phase F: Interface
+
+- [ ] **F1. FastAPI review queue**
+- [ ] **F2. Metrics dashboard** (funnel, response rate by coverage bucket,
+      by time-to-apply, by base resume version)
+- [ ] **F3. Telegram notifier**
+
+## Phase G: Apply
+
+- [ ] **G1. Form schema fetch + autonomy gating** (no browser)
+- [ ] **G2. Playwright filler, dry-run only**
+- [ ] **G3. Level 2, pause before submit**
+- [ ] **G4. Level 3, capped at 3/day**
+
+## Phase H: Outreach
+
+- [ ] **H1. Contact discovery**
+- [ ] **H2. Draft-only referral emails, manual send**
+
+---
+
+## Rules
+
+1. Phase A must be fully green before Phase D. A rubric scoring a renderer you
+   do not trust reports fiction.
+2. B2 jumps the queue. Snapshots only get more valuable and cannot be recovered.
+3. C2 is yours to do by hand. Everything after it is calibrated against it.
+4. Do not write specs for Phase F onward until Phase D runs on real data.

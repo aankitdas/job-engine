@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+data/
+resume/rendered/
+identity.toml
+*.db
+.playwright/
