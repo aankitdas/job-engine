@@ -1,0 +1,39 @@
+[project]
+name = "job-engine"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Aankit", email = "aankitdas5@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.141.1",
+    "httpx>=0.28.1",
+    "jinja2>=3.1.6",
+    "ollama>=0.6.2",
+    "pydantic>=2.13.4",
+    "pydantic-settings>=2.14.2",
+    "python-docx>=1.2.0",
+    "python-multipart>=0.0.32",
+    "python-telegram-bot>=22.8",
+    "pyyaml>=6.0.3",
+    "sqlite-utils>=4.1.1",
+    "tenacity>=9.1.4",
+    "uvicorn>=0.52.0",
+]
+
+[project.scripts]
+job-engine = "job_engine:main"
+
+[build-system]
+requires = ["uv_build>=0.12.0,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "mypy>=2.3.0",
+    "pdfplumber>=0.11.10",
+    "pytest>=9.1.1",
+    "ruff>=0.16.1",
+]
