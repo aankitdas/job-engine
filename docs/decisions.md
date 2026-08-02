@@ -18,6 +18,14 @@ Bulk harvest itself (Common Crawl CDX scan) is deferred, not built; `seed`
 companies only (`INSERT OR IGNORE`) and never touch an existing row, so a
 company `validate` has already promoted to `active` cannot be silently
 reset to `unverified` by re-running seed.
+Addendum (B2): spec 04's "if content_hash changed, record an edit event"
+has no backing table anywhere in the 16-table schema; the `runs` table is
+a per-sync-run summary (id, stage, counts, errors), not a per-job event
+log. Confirmed by asking rather than inventing a table or dropping the
+requirement: an edit is a `logging.info()` line plus a count in that
+sync run's `runs.counts.edited`, not a new row anywhere. Revisit only if
+a durable per-job edit history turns out to be needed downstream (e.g. for
+showing "this JD changed since you last looked" in the review queue).
 
 **D3. `first_seen_at` is computed by us.**
 Greenhouse `updated_at` is not a post date. Snapshot history cannot be
@@ -149,3 +157,21 @@ list by hand when a new tool lands in the bank; revisit the narrow scope
 only if a real jargon leak surfaces through a word that was never in the
 list, not by trying to make the check smarter. Confirmed by asking, twice
 (once for the keyword-leakage framing, once for the tech-list narrowing).
+
+**D22. `data/jobengine.db` is irreplaceable once B2 is live, not scratch
+state.**
+Before B2, the db held only what a fresh `seed`/`sync` could regenerate, so
+resetting it during a live sanity check was harmless, and happened more
+than once during B1 and B2's own sessions ("wiping the db back to empty" /
+"DB wiped clean again"), narrated in the moment but never asked about
+first. Once B2 landed, `jobs.first_seen_at` encodes real elapsed-time
+history (when a posting actually first appeared) that cannot be
+reconstructed after the fact; deleting or re-initing the real db destroys
+that history silently; nothing in the schema or the CLI would even notice.
+Confirmed by asking: any destructive operation (`rm`, `init`, `migrate`, or
+equivalent) against the real `data/jobengine.db` path requires asking
+first and getting explicit confirmation in that message, no exceptions for
+"just a quick check." Exploratory or live-API sanity checks use a scratch
+copy or a temp path instead (see hard rule 13 in CLAUDE.md). This reverses
+the working assumption every prior session operated under; do not fall
+back to the old "reset it, it's just fetched data" habit out of momentum.

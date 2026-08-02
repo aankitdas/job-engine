@@ -92,10 +92,26 @@ uv run python -m jobengine.sources.sync --dry-run
 ```
 
 ## Scheduling
-Twice daily. On WSL2, cron inside the WSL instance only runs while WSL is
-running, so either use Windows Task Scheduler to invoke
-`wsl -e bash -lc "cd ~/projects/job-engine && ./scripts/sync.sh"`, or keep
-WSL alive. Document whichever you choose in the repo README.
+Every 3 hours, not twice daily as originally planned here. ATS platforms
+batch-publish new postings tied to business-hour/weekday HR workflows, not a
+fixed clock time, so there is no single "optimal" sync time per company to
+aim for. The reliable lever is polling frequency instead: these are free,
+unauthenticated APIs with no per-call cost, so shrinking the poll interval
+directly shrinks the worst-case "missed a posting for N hours" window with
+no real downside. Windows Task Scheduler task `job-engine-sync`: trigger
+starts 6am local time, `PT3H` repetition interval, `P1D` duration (fires
+every 3 hours, resetting daily).
+
+On WSL2, cron inside the WSL instance only runs while WSL is running, so
+scheduling happens on the Windows side: Task Scheduler invokes
+`C:\Users\aanki\run-sync.bat`, which shells into WSL to run `cd
+~/projects/job-engine && ./scripts/sync.sh`. Point the task directly at the
+`.bat` file with no inline arguments, not at `wsl.exe` with an inline `-e
+bash -lc "..."` argument string in the task's own Action: the Task
+Scheduler GUI's handling of that argument string produced "arguments not
+valid" errors during setup, a GUI/argument-parsing quirk, not a problem
+with the script. Create the task via `schtasks /create` (CLI) rather than
+the GUI for the same reason.
 
 ## Definition of done
 Two sync runs a day apart produce a non-zero count of rows with

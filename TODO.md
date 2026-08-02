@@ -50,9 +50,12 @@ Snapshot history cannot be backfilled.
   (Met via `sources.registry seed`/`validate`, not `sources.sync`; see
   PROGRESS.md, sync.py's fetch+diff loop is B2's scope.)
 
-- [ ] **B2. Fetch and diff**
+- [x] **B2. Fetch and diff**
   Done: two runs a day apart show a non-zero `first_seen_at` delta.
   **Put this on a schedule the day it works.**
+  (Unit-tested via same-run/next-run simulation, not a literal 24h gap; a
+  real two-days-apart production check is still needed once scheduled, see
+  PROGRESS.md.)
 
 - [ ] **B3. Deterministic filters + profile routing**
   Done: a full fetch reduces to 300-500 candidates/day and you agree with the

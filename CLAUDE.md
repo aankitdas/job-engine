@@ -50,3 +50,12 @@ Append these to the existing CLAUDE.md from SETUP.md.
     `specs/08-rubric.md` instead, or ask me.
 12. P3 rephrases must not introduce any proper noun, number, or technology
     absent from the parent bullet. Validate this in code, not in the prompt.
+13. Once B2 (fetch and diff) landed, `data/jobengine.db` holds irreplaceable
+    accumulating state, `first_seen_at` history across real elapsed time
+    that cannot be refetched or regenerated. Never run `rm`, `init`,
+    `migrate`, or any other destructive or state-resetting operation
+    against the real `data/jobengine.db` path without asking me first and
+    waiting for explicit confirmation in that message, even for a "quick
+    sanity check." Use a scratch copy or a temp path (`tmp_path` in tests,
+    `/tmp` or the scratchpad elsewhere) for any exploratory check that
+    doesn't need to persist.

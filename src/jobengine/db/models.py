@@ -50,6 +50,16 @@ class Outcome(BaseModel):
     note: str | None = None
 
 
+class Run(BaseModel):
+    id: int | None = None
+    stage: str
+    started_at: str
+    ended_at: str | None = None
+    counts: str | None = None
+    cost_usd: float | None = None
+    errors: str | None = None
+
+
 def upsert_company(conn: sqlite3.Connection, company: Company) -> None:
     """Insert a company, or update it on (slug, ats) conflict.
 
@@ -142,6 +152,45 @@ def get_company(conn: sqlite3.Connection, slug: str, ats: str) -> Company | None
     return Company(**dict(row))
 
 
+def list_active_companies(conn: sqlite3.Connection) -> list[Company]:
+    rows = conn.execute("SELECT * FROM companies WHERE status = 'active'").fetchall()
+    return [Company(**dict(row)) for row in rows]
+
+
+def close_missing_jobs(
+    conn: sqlite3.Connection,
+    ats: str,
+    company_slug: str,
+    seen_ats_job_ids: set[str],
+    closed_at: str,
+) -> int:
+    """Set closed_at on every open job for this company not in seen_ats_job_ids.
+
+    Diffs the id sets in Python and updates one row per missing job instead
+    of a single `NOT IN (...)` query: a large board (Ashby's OpenAI listing
+    ran 750+ postings during B1's live check) risks SQLite's per-statement
+    bound-parameter ceiling with a single IN/NOT IN clause, and chunking
+    that clause is more code than just diffing two id sets directly.
+    """
+    open_ids = {
+        row[0]
+        for row in conn.execute(
+            "SELECT ats_job_id FROM jobs "
+            "WHERE ats = ? AND company_slug = ? AND closed_at IS NULL",
+            (ats, company_slug),
+        ).fetchall()
+    }
+    missing = open_ids - seen_ats_job_ids
+    if not missing:
+        return 0
+    conn.executemany(
+        "UPDATE jobs SET closed_at = ? "
+        "WHERE ats = ? AND company_slug = ? AND ats_job_id = ?",
+        [(closed_at, ats, company_slug, job_id) for job_id in missing],
+    )
+    return len(missing)
+
+
 def insert_outcome(conn: sqlite3.Connection, outcome: Outcome) -> int:
     cursor = conn.execute(
         """
@@ -150,5 +199,17 @@ def insert_outcome(conn: sqlite3.Connection, outcome: Outcome) -> int:
         RETURNING id
         """,
         outcome.model_dump(exclude={"id"}),
+    )
+    return cursor.fetchone()[0]
+
+
+def record_run(conn: sqlite3.Connection, run: Run) -> int:
+    cursor = conn.execute(
+        """
+        INSERT INTO runs (stage, started_at, ended_at, counts, cost_usd, errors)
+        VALUES (:stage, :started_at, :ended_at, :counts, :cost_usd, :errors)
+        RETURNING id
+        """,
+        run.model_dump(exclude={"id"}),
     )
     return cursor.fetchone()[0]

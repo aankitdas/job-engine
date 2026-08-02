@@ -4,9 +4,22 @@
 the end via `/checkpoint`. Do not rely on memory of previous sessions.**
 
 Last updated: 2026-08-02
-Current task: B2 (fetch and diff, specs/04-sources.md) or A4b (PDF conversion,
-specs/03-renderer.md "PDF" section), not started; either is unblocked, ask
-which to do next
+Current task: B3 (filters + routing, specs/04-sources.md's downstream) or
+A4b (PDF conversion, specs/03-renderer.md "PDF" section), not started;
+either is unblocked, ask which to do next. Windows Task Scheduler task
+`job-engine-sync` is built and wired to `scripts/sync.sh` (every 3h from
+6am local); what's still open is the unattended-overnight proof that it
+fires on its own, not a human running `schtasks /run`. See Known Issues,
+including a live signal from this checkpoint's own read-only db check that
+needs watching, not yet confirmed either way.
+
+**Read this before touching `data/jobengine.db`:** hard rule 13 in
+CLAUDE.md (added 2026-08-02, see D22 in docs/decisions.md) requires asking
+first, with explicit confirmation in that message, before any `rm`, `init`,
+`migrate`, or other destructive/state-resetting operation against the real
+db path, no exception for "quick sanity checks." Use a scratch copy or a
+temp path instead. This reverses how every prior session (including this
+project's own B1/B2 sessions) treated that file.
 
 ---
 
@@ -21,7 +34,7 @@ which to do next
 | A4b | PDF conversion (LibreOffice headless) | not started | blocks D2 |
 | A4c | Watermarking (speculative preview) | not started | no urgency, no speculative bullets exist yet |
 | B1 | ATS clients + registry | done | clients+registry only, sync.py's fetch/diff loop is B2 |
-| B2 | Fetch and diff | not started | |
+| B2 | Fetch and diff | done | `scripts/sync.sh` exists; not yet on cron/Task Scheduler, real two-days-apart check still pending, see Known Issues |
 | B3 | Filters + routing | not started | |
 | C1 | LLM router | not started | |
 | C2 | Eval fixtures | not started | human task |
@@ -219,6 +232,53 @@ Status values: `not started` | `in progress` | `blocked` | `done`
   mocked tests): 14 of 15 resolved on the first guess, `doordash` 404'd and
   turned out to be `doordashusa`, fixed in the file itself. This is a small
   starter set, not the real 150-300 list spec 04 calls for; expand by hand.
+- `src/jobengine/sources/sync.py`: `sync(conn, dry_run=False, fetchers=None)
+  -> RunSummary`, the fetch-and-diff loop from spec 04. Iterates
+  `companies.status='active'` (via new `list_active_companies()` in
+  `db/models.py`), fetches each board through B1's clients, and for every
+  posting: looks up the existing row's `content_hash` via `get_job()`
+  first (needed to detect edits before it's overwritten), maps
+  `JobPosting` to `db.models.Job` (`content_hash = sha256(description_plain
+  or "")`), and calls `upsert_job()` with `first_seen_at=now()`
+  unconditionally on every call, new or existing. That's safe only because
+  `upsert_job`'s `ON CONFLICT DO UPDATE` already omits `first_seen_at` from
+  its SET list (built in A1); `sync.py` adds no new immutability logic of
+  its own, it just relies on what's already there. A changed
+  `content_hash` on an existing row is `logging.info()`'d and counted in
+  `edited`, not written as a new table row (confirmed by asking, no
+  edit-log table exists in the 16-table schema; see docs/decisions.md D2's
+  addendum). Per-company fetch failures (dead slug, exhausted retries) are
+  caught, logged, and skip only that company; one bad board never aborts
+  the run, and a failed company's existing jobs are left untouched by the
+  close-missing-jobs step since we never got a valid response to diff
+  against. `--dry-run` is not a second code path: the full diff always
+  runs and always writes, `dry_run` only decides `conn.commit()` vs.
+  `conn.rollback()` at the very end, so there is exactly one implementation
+  of the diff logic. One free, non-obvious side effect worth knowing about:
+  because every posting still present in a fetch gets `closed_at=None`
+  explicitly, and `upsert_job`'s SET clause already includes `closed_at =
+  excluded.closed_at`, a job that closes on one sync and reappears on a
+  later one automatically un-closes with no special-case code; this falls
+  directly out of the existing upsert, `sync.py` doesn't add reopen logic.
+  Every `sync()` call writes exactly one row to the new `runs` table
+  (`stage='sync'`, `counts` JSON of new/updated/edited/closed/
+  companies_ok/companies_failed, `errors` JSON list of per-company
+  failure strings) via a new `record_run()` accessor, before the
+  commit/rollback decision, so a dry run's `runs` row is rolled back too.
+  CLI: `uv run python -m jobengine.sources.sync [--dry-run]`.
+- `db/models.py` gained three accessors for B2: `list_active_companies()`,
+  `record_run()` (new `Run` pydantic model), and `close_missing_jobs()`.
+  **`close_missing_jobs` diffs id sets in Python and issues one `UPDATE`
+  per missing job via `executemany`, not a single batched `WHERE
+  ats_job_id NOT IN (...)` query.** Deliberate: a single `IN`/`NOT IN`
+  clause risks SQLite's per-statement bound-parameter ceiling on a large
+  board (Ashby's real OpenAI listing was 752 postings during this
+  session's live check, comfortably within most limits today but not a
+  bet worth making as boards grow), and chunking that clause into safe
+  batches would be more code than just diffing two Python sets and looping
+  the updates. Only ever iterates over what's actually missing (typically
+  a handful of closed postings per company per run), so the loop is cheap
+  in practice.
 - `companies.source` CHECK constraint widened from `('seed', 'harvest')` to
   `('seed', 'harvest', 'manual')` in `schema.sql`, plus the matching column
   note in specs/00-data-model.md, so `registry add`'s manually-registered
@@ -227,6 +287,27 @@ Status values: `not started` | `in progress` | `blocked` | `done`
   time (verified before touching it), so this was a drop-and-`db init`,
   not a real migration; no `schema_migrations` bump needed since there was
   no data to migrate.
+- `scripts/sync.sh`: bash wrapper for the cron/Task Scheduler entry spec 04
+  calls for ("Scheduling"). `cd`s into the repo via `${BASH_SOURCE[0]}`
+  (works regardless of caller's cwd, verified by running it from `/tmp`),
+  prepends `~/.local/bin` to `PATH` and sources `.venv/bin/activate` since
+  a cron/Task Scheduler environment often lacks both, then runs `uv run
+  python -m jobengine.sources.sync`, appending timestamped stdout/stderr to
+  `data/logs/sync-YYYY-MM-DD.log`. `chmod +x`'d. Now actually invoked by
+  Windows Task Scheduler task `job-engine-sync` (created via `schtasks
+  /create`, points at `C:\Users\aanki\run-sync.bat` with no inline
+  arguments, every 3h from 6am local); see Known Issues for what's still
+  unverified about that.
+- **`data/jobengine.db` currently holds real accumulated state: 15
+  companies, 3834 jobs, 8 `runs` rows** (verified read-only via a plain
+  `SELECT COUNT(*)`/`SELECT * FROM runs`, not modified as part of this
+  checkpoint, per the hard rule below). This is not something to reset
+  "back to clean" in a future session without asking first, it may now
+  represent real `first_seen_at` history rather than disposable fetched
+  data. See the header note above and D22 in docs/decisions.md. Row count
+  grew from 6 to 8 `runs` between the last checkpoint and this one (ids 7
+  and 8, `started_at` 22:40:20 and 22:59:58 UTC on 2026-08-02); see Known
+  Issues for why that's not yet being read as proof of unattended firing.
 
 ---
 
@@ -318,6 +399,82 @@ Status values: `not started` | `in progress` | `blocked` | `done`
   time. Spec 04 only says "exponential backoff" with no concrete numbers,
   so this was a free choice, not a spec compromise; revisit if real-world
   5xx behavior from Greenhouse/Ashby suggests otherwise.
+- **B2's DoD is only partially verified, and this matters before relying on
+  it in production.** Spec 04's literal acceptance criterion is "two sync
+  runs a day apart produce a non-zero count of rows with `first_seen_at`
+  on the second day," plus `tests/test_sync.py` asserting a second sync of
+  unchanged data touches no `first_seen_at`. The second half is real and
+  automated: `test_second_sync_of_unchanged_data_does_not_change_first_seen_at`
+  and `test_new_posting_on_second_run_gets_its_own_first_seen_at` both
+  pass, and were additionally re-verified against the live APIs this
+  session (seeded all 15 companies, ran `sync` twice back to back: run 1
+  wrote 3834 new jobs across 15 distinct `first_seen_at` timestamps, run 2
+  showed `new=0 updated=3834`, and a direct SQL check afterward confirmed
+  still exactly 15 distinct `first_seen_at` values, one per company, all
+  from run 1). What is **not** verified, and can't be by a unit test or a
+  same-session live check: a real *unattended* production execution, not
+  triggered by a human. Same category of caveat as A4's golden test
+  needing a manual Word check, "tests green" proves the mechanism, not the
+  schedule firing on its own. See the next bullet for exactly what's left
+  and the check to run tomorrow.
+- **Scheduling is built and manually-verified-once; the unattended proof
+  is what's left, not the scheduling itself.** Earlier notes in this file
+  said scheduling was "unstarted" — that was wrong as of this session and
+  is corrected here. What actually exists: Windows Task Scheduler task
+  `job-engine-sync`, created via `schtasks /create` (CLI, not the GUI: the
+  GUI produced "arguments not valid" errors from how it saved an inline
+  `wsl.exe -e bash -lc "..."` argument string, a GUI quirk, not a script
+  problem), pointing directly at `C:\Users\aanki\run-sync.bat` with no
+  inline arguments. Schedule is every 3 hours starting 6am local time
+  (`PT3H` interval, `P1D` duration, so ~6/9/12/15/18/21 local), not twice
+  daily as spec 04 originally said; spec 04's "Scheduling" section has
+  been rewritten with the reasoning (ATS platforms batch-publish on
+  business-hour HR workflows, not a fixed clock time, so polling frequency
+  is the reliable lever, not time-of-day, and these are free
+  unauthenticated APIs so a shorter interval has no real downside).
+  Manually confirmed working once via `schtasks /run`: `runs` row id 6 in
+  `data/jobengine.db`, `companies_ok=15`, `updated=3834`, `new=0`,
+  `edited=0` (zero drift from the id-5 run right before it). What that
+  proves: the `.bat` -> WSL -> `scripts/sync.sh` -> `sync.py` chain works
+  end to end when invoked. What it does **not** prove: that Task Scheduler
+  actually fires it unattended at its configured trigger times, since
+  every `runs` row known at the time (ids 1-6, all
+  2026-08-02T22:03-22:27 UTC) was a manual `schtasks /run` during
+  setup/debugging, not a real trigger firing.
+  **Update from this checkpoint's own read-only db check:** two more
+  `runs` rows have appeared since (id 7 at 22:40:20 UTC, id 8 at
+  22:59:58 UTC), both `companies_ok=15 updated=3834 new=0 edited=0`, same
+  healthy zero-drift shape as id 6. Not treating this as evidence of
+  unattended firing yet: the gaps between ids 6-7-8 are ~13 and ~20
+  minutes, nowhere near the configured 3-hour interval, so these still
+  read as continued manual testing/debugging rather than the schedule
+  actually kicking in on its own. Genuine unattended firings should land
+  roughly 3 hours apart with nobody at the keyboard; that pattern hasn't
+  shown up in the `runs` table yet.
+  **Check to run tomorrow:** query `runs` (not `jobs`) grouped by
+  `date(started_at)` and hour, `SELECT strftime('%Y-%m-%d %H', started_at)
+  AS hour, counts FROM runs WHERE stage = 'sync' ORDER BY started_at` and
+  look for six new rows landing on their own near 06/09/12/15/18/21 local,
+  with nobody having run `schtasks /run` that day. The `runs` table is the
+  right thing to group, not `jobs.first_seen_at` as originally suggested:
+  `runs` gets a row on every invocation regardless of outcome, while
+  `first_seen_at` clusters only appear at a trigger time if a genuinely
+  new posting happened to show up in that specific 3-hour window, quiet
+  companies could make a real firing look like a miss if `jobs` is the
+  only thing checked. Worth checking both, but treat `runs` as the
+  authoritative firing record and `jobs.first_seen_at` clustering as
+  corroborating evidence, not the primary signal.
+- `sync.py`'s CLI (`_main()`) calls `logging.basicConfig(level=logging.INFO)`
+  globally, which also turns on `httpx`'s own INFO-level request logging,
+  every GET request prints a line. Harmless (stderr noise, not a
+  correctness issue) but not intentional CLI polish; narrow the config to
+  `jobengine`'s own logger if this gets annoying in practice.
+- `sync.py`'s `content_hash` covers only `description` (per spec 00's
+  literal column note: "sha256 of description, detects real edits"). A
+  title or location change on an otherwise-identical posting will not
+  trigger an `edited` count or log line. Read as the spec's intended
+  scope, not an oversight; revisit only if a real title-change case turns
+  out to matter downstream.
 
 ---
 
@@ -428,6 +585,50 @@ Status values: `not started` | `in progress` | `blocked` | `done`
   on the 1st or 2nd failure) was invented. Not asked separately; read as
   the literal, more conservative interpretation of the spec text rather
   than a judgment call worth interrupting for.
+- Spec 04's "if content_hash changed, record an edit event" has no backing
+  table anywhere in the 16-table schema (checked specs/00-data-model.md
+  and the `runs` table, which is a per-sync-run summary, not a per-job
+  log). Confirmed by asking rather than either inventing a new table
+  silently or dropping the requirement silently: edit events are a
+  `logging.info()` line per changed job plus an `edited` count in that
+  sync run's `runs.counts` JSON, no schema change. Significant enough
+  (real spec/schema gap, not a stylistic call) that it's also recorded as
+  an addendum to D2 in docs/decisions.md.
+- `close_missing_jobs()` in `db/models.py` diffs open-job id sets in
+  Python and issues one `UPDATE` per missing job (`executemany`), not a
+  single `WHERE ats_job_id NOT IN (...)` query. Not asked separately
+  (an implementation-robustness call, not a spec ambiguity): a live check
+  during this session showed Ashby's real OpenAI board at 752 postings,
+  which is fine under most SQLite bound-parameter ceilings today but not a
+  bet worth encoding into a query that gets less safe as boards grow;
+  diffing two sets and looping avoids the question entirely for about the
+  same amount of code.
+- `sync()`'s `--dry-run` is implemented as a single code path (the full
+  diff always runs and always writes) with the decision deferred to
+  `conn.commit()` vs. `conn.rollback()` at the very end, rather than two
+  separate branches (one that writes, one that only computes and prints).
+  Not asked separately: this was the design already named in the plan
+  presented before coding, chosen specifically so there is exactly one
+  implementation of the diff logic to keep correct, not two that could
+  silently drift apart.
+- `data/jobengine.db` is now treated as irreplaceable once B2 landed, not
+  scratch state that a live sanity check can freely reset. Every prior
+  session (this one's own B1 and B2 work included) reset the real db after
+  live-API checks without asking first, on the reasoning that pre-B2 it
+  held nothing but refetchable data. That reasoning stopped holding the
+  moment `jobs.first_seen_at` started encoding real elapsed-time history:
+  a reset now destroys information that cannot be regenerated, and nothing
+  in the schema or CLI would even flag it. Confirmed by asking, and
+  significant enough to be a hard rule, not just a habit: CLAUDE.md rule
+  13 and D22 in docs/decisions.md. Investigated first, before adding the
+  rule, whether any test fixture could have caused a prior data loss
+  report by silently pointing at the real db path; confirmed none can
+  (every `connect()` call in `tests/*.py` passes an explicit `tmp_path`,
+  no `conftest.py` exists to inject a shared override, and the only three
+  `connect(DEFAULT_DB_PATH)` call sites are the real CLI entry points in
+  `db/__main__.py`, `sources/registry.py`, and `sources/sync.py`). The
+  actual cause of that particular report was this session's own prior
+  live-check resets, not a bug.
 
 ---
 
@@ -435,6 +636,88 @@ Status values: `not started` | `in progress` | `blocked` | `done`
 
 (Newest first. Date, task id, what changed, what to do next.)
 
+- 2026-08-02, infra/safety (checkpoint verification, no code changes):
+  Re-verified full state: `uv run pytest` 98/98 passing, `ruff
+  check`/`format --check` clean on everything touched this project's B1/B2
+  work (the 3 `RUF059` findings and 2 unformatted files remain the same
+  pre-existing `tests/test_render.py`/`tests/test_slop_lint.py` debt from
+  before this session, still untouched). Corrected two stale claims this
+  file made earlier in the day: scheduling is not "unstarted", Windows
+  Task Scheduler task `job-engine-sync` exists (`schtasks /create`, every
+  3h from 6am local, pointed at `C:\Users\aanki\run-sync.bat`), and
+  spec 04's Scheduling section was rewritten to match, with the
+  batch-publish-timing-vs-polling-frequency reasoning behind the 3h
+  interval. Read-only checked the real `data/jobengine.db` (per hard rule
+  13, no writes) and found `runs` grew from 6 to 8 rows since the last
+  checkpoint (ids 7-8, 22:40:20 and 22:59:58 UTC, both healthy
+  `companies_ok=15 updated=3834 new=0 edited=0`). Did not read this as
+  proof of unattended firing: the ~13-20 minute gaps between ids 6-7-8
+  don't match the configured 3-hour interval, so these still look like
+  continued manual/debugging invocations. Named the concrete check for
+  tomorrow in Known Issues: query `runs` (not `jobs.first_seen_at`, which
+  can false-negative on a quiet 3-hour window) for six rows landing on
+  their own near 06/09/12/15/18/21 local with nobody running `schtasks
+  /run` that day. Next: your call between B3, A4b, or waiting out the
+  unattended-firing check before treating B2 as fully production-live.
+- 2026-08-02, infra/safety (not a TODO.md item): Added `scripts/sync.sh`
+  (bash wrapper: cd into repo, `PATH`/venv setup for cron/Task Scheduler
+  environments, `uv run python -m jobengine.sources.sync`, timestamped log
+  to `data/logs/sync-YYYY-MM-DD.log`), `chmod +x`'d and verified by running
+  it from `/tmp` to confirm the cd-into-repo logic is caller-cwd-agnostic.
+  Investigated a report that the real `data/jobengine.db` was found empty
+  with no `init`/`migrate` in shell history: confirmed the test suite
+  structurally cannot be the cause (every `connect()` call across
+  `tests/*.py` passes an explicit `tmp_path`, no `conftest.py` exists, the
+  only real-path `connect(DEFAULT_DB_PATH)` call sites are the three CLI
+  entry points), and that the actual cause was this session's own prior
+  live-API sanity-check resets during B1 and B2, narrated in the moment
+  but never asked about first. Added CLAUDE.md hard rule 13 and D22 in
+  docs/decisions.md: no destructive operation against the real
+  `data/jobengine.db` path without asking first and getting explicit
+  confirmation, use a scratch/temp path for exploratory checks instead.
+  This reverses the working assumption every prior session, including
+  this one's own B1/B2 work, operated under. As of this checkpoint the
+  real db holds 15 companies, 3834 jobs, and 6 `runs` rows (verified
+  read-only, not touched this session); likely from a manual run of the
+  pipeline or `scripts/sync.sh` outside this session's own tool calls,
+  now left alone under the new rule rather than reset "back to clean."
+  `uv run pytest` 98/98 passing; nothing new introduced to `ruff check`
+  (the 3 `RUF059` findings and 2 unformatted files are the same
+  pre-existing `tests/test_render.py`/`tests/test_slop_lint.py` debt noted
+  in prior checkpoints, still untouched, still not this session's scope).
+  Next: your call between B3, A4b, or actually wiring `scripts/sync.sh`
+  into cron/Windows Task Scheduler so B2 becomes production-live instead
+  of just manually-invokable.
+- 2026-08-02, B2 (done): Implemented `src/jobengine/sources/sync.py`
+  (`sync()`, per-company fetch+diff, `--dry-run` CLI) and three new
+  `db/models.py` accessors (`list_active_companies`, `record_run` +
+  `Run` model, `close_missing_jobs`). `tests/test_sync.py` (10 tests,
+  written and confirmed all-red on `ImportError` before implementation)
+  covers both halves of spec 04's literal DoD by name
+  (`test_second_sync_of_unchanged_data_does_not_change_first_seen_at`,
+  `test_new_posting_on_second_run_gets_its_own_first_seen_at`) plus edit
+  detection, closed_at set/clear (including the free reopen-on-upsert
+  behavior), per-company failure isolation, dry-run write suppression, and
+  the new `runs` table. All 10 passed on the first implementation attempt.
+  Resolved one real spec/schema gap by asking before coding: "record an
+  edit event" (spec 04) has no backing table, so it's a log line + a
+  `runs.counts.edited` count, not a new table (see D2 addendum in
+  docs/decisions.md). Also re-verified end to end against the live APIs,
+  not just mocked tests: seeded all 15 real companies, ran `sync` twice
+  back to back (3834 jobs, run 1 all-new, run 2 `new=0 updated=3834`), and
+  confirmed by direct SQL query that only 15 distinct `first_seen_at`
+  values exist afterward, one per company, none moved between runs.
+  **What's still open, not silently treated as done:** the real
+  two-syncs-a-day-apart production check (can't be simulated in a single
+  session or a unit test) and putting `sync.py` on an actual schedule,
+  both spec 04 requirements, tracked in Known Issues, not yet started.
+  `uv run pytest` 98/98 passing; `ruff check`/`format --check` clean on
+  everything touched this session. TODO.md B2 checked off with a note that
+  its "two runs a day apart" clause is unit-simulated, not literally
+  time-separated yet. Next: your call between B3 (filters + routing,
+  unblocked now that jobs actually populate) and A4b (PDF conversion,
+  unblocked, blocks D2), or scheduling B2 first since it's now the thing
+  standing between "code done" and "actually running."
 - 2026-08-02, B1 (done): Implemented `src/jobengine/sources/{models,
   _client,greenhouse,ashby,registry}.py` and `tests/test_sources.py` (18
   tests, written and confirmed all-red on `ImportError` before
