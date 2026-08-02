@@ -1,0 +1,572 @@
+meta:
+  owner: "Aankit Das"
+  updated: "2026-08-02"
+
+education:
+  - id: edu_utd
+    degree: "MS"
+    field: "Computer Engineering"
+    institution: "University of Texas at Dallas"
+    gpa: "3.8/4.0"
+    status: "May 2025"
+    requires_degree_profiles: [ai_ml_engineer, data_scientist]
+
+  - id: edu_calcutta
+    degree: "BTech"
+    field: "Electronics and Communication Engineering"
+    institution: "University of Calcutta"
+    gpa: "3.7/4.0"
+    status: "Status - Graduated"
+    requires_degree_profiles: [ai_ml_engineer, software_engineer, data_scientist]
+
+certificates: []
+
+roles:
+  - id: role_bantrly
+    company: "Bantrly"
+    location: "Dallas, TX"
+    start: "2026-03"
+    end: null
+    kind: full_time
+    title:
+      default: "AI Engineer"
+      ai_ml_engineer: "AI Engineer"
+      software_engineer: "Software Engineer, AI Platform"
+      data_scientist: "Machine Learning Engineer"
+    summary:
+      id: b_bantrly_sum
+      text: "Built the speech and language systems behind a K-12 learning
+             app by turning student audio into text and scoring it against
+             teaching rubrics"
+      keywords: [Python, FastAPI, speech-to-text, LLM]
+      status: verified
+    bullets:
+      - id: b_bantrly_01
+        status: verified
+        what: "modular speech-to-text routing engine"
+        how: "separated transcription from LLM scoring across 8 assessment modules"
+        result: "cut audio API costs and improved scoring rubric accuracy"
+        text: "Built a modular speech-to-text routing engine in Python and
+               FastAPI that separated transcription from LLM scoring across
+               8 K-12 assessment modules, cutting audio API costs and
+               improving rubric accuracy"
+        keywords: [Python, FastAPI, LLM, speech-to-text, API design]
+        evidence: "internal"
+        profiles: [ai_ml_engineer, software_engineer]
+
+      - id: b_bantrly_02
+        status: verified
+        what: "two-layer voice activity detection chunking pipeline"
+        how: "combined silence-boundary audio chunking with timestamp
+              deduplication and a sliding text window for guardrail checks"
+        result: "eliminated boundary-induced false positives during real-time streaming"
+        text: "Implemented a two-layer voice activity detection chunking
+               pipeline that combined silence-boundary audio chunking with
+               timestamp deduplication and a sliding text window for
+               guardrail checks, eliminating boundary-induced false
+               positives during real-time streaming"
+        keywords: [VAD, real-time streaming, audio chunking]
+        evidence: "internal"
+        profiles: [ai_ml_engineer, software_engineer]
+
+      - id: b_bantrly_03
+        status: verified
+        what: "provider-agnostic adapter registry across Parakeet TDT, Whisper, AssemblyAI, and Gemini"
+        how: "added quality-based fallback and session health checks driven entirely by config"
+        result: "let engines swap with zero code changes"
+        text: "Built a provider-agnostic adapter registry across Parakeet
+               TDT, Whisper, AssemblyAI, and Gemini with quality-based
+               fallback and session health checks driven entirely by
+               config, letting engines swap with zero code changes"
+        keywords: [adapter registry, fallback, config-driven]
+        evidence: "internal"
+        profiles: [ai_ml_engineer, software_engineer]
+
+      - id: b_bantrly_04
+        status: verified
+        what: "neural text-to-speech engines pyttsx3, Kokoro, edge-tts, Chatterbox, and Chirp"
+        how: "scored them against a structured rubric of intelligibility,
+              naturalness, pacing, and latency per K-12 grade band"
+        result: "produced cost-quality comparisons that guided engine selection"
+        text: "Evaluated neural text-to-speech engines pyttsx3, Kokoro,
+               edge-tts, Chatterbox, and Chirp against a structured rubric
+               of intelligibility, naturalness, pacing, and latency per
+               K-12 grade band, producing cost-quality comparisons that
+               guided engine selection"
+        keywords: [text-to-speech, evaluation rubric]
+        evidence: "internal"
+        profiles: [ai_ml_engineer, data_scientist]
+
+      - id: b_bantrly_05
+        status: verified
+        what: "LLM-as-judge evaluation pipeline"
+        how: "combined structured JSON output, retry logic, and
+              cosine-similarity consistency scoring via nomic-embed-text
+              embeddings across 468 controlled experiments on 3
+              open-source models"
+        result: "quantified quality, consistency, and hallucination trade-offs"
+        text: "Designed an LLM-as-judge evaluation pipeline combining
+               structured JSON output, retry logic, and cosine-similarity
+               consistency scoring via nomic-embed-text embeddings across
+               468 controlled experiments on 3 open-source models,
+               quantifying quality, consistency, and hallucination
+               trade-offs"
+        keywords: [LLM-as-judge, embeddings, evaluation pipeline]
+        evidence: "internal"
+        profiles: [ai_ml_engineer, data_scientist]
+
+  - id: role_utd_researcher
+    company: "University of Texas at Dallas"
+    location: "Richardson, TX"
+    start: "2025-06"
+    end: "2026-03"
+    kind: research
+    title:
+      default: "Machine Learning Researcher"
+    summary:
+      id: b_utd_sum
+      text: "Built and optimized neural network pipelines to extract clean
+             signal from noisy space telescope data for an NSF-funded
+             cosmology research project"
+      keywords: [neural networks, deep learning, cosmology]
+      status: verified
+    bullets:
+      - id: b_utd_01
+        status: verified
+        what: "active contributor to the CMB-ML open-source research organization"
+        how: "supported ongoing cosmology and machine learning research shared with collaborators"
+        result: "work now in progress toward a submission to ICCV or CVPR"
+        text: "Contributed to the CMB-ML open-source research organization,
+               supporting ongoing cosmology and machine learning research
+               toward a planned ICCV or CVPR submission"
+        keywords: [open-source, cosmology, machine learning]
+        evidence: "https://github.com/CMB-ML"
+        profiles: [ai_ml_engineer, data_scientist]
+
+      - id: b_utd_02
+        status: verified
+        what: "1,600 high-resolution CMB simulated maps totaling 24GB"
+        how: "processed and managed them across multiple train, validation, and test splits"
+        result: "produced a clean, reproducible dataset for model training"
+        text: "Processed and managed 1,600 high-resolution CMB simulated
+               maps totaling 24GB across multiple splits for model
+               training"
+        keywords: [data processing, large-scale datasets]
+        evidence: "internal"
+        profiles: [ai_ml_engineer, data_scientist]
+
+      - id: b_utd_03
+        status: verified
+        what: "UNet-inspired encoder-decoder neural network architecture"
+        how: "trained it on modern GPUs in under 20 seconds per epoch to
+              denoise and recover the angular power spectrum from
+              simulated maps"
+        result: "delivered a faster, GPU-efficient alternative to traditional Bayesian pipelines"
+        text: "Developed a UNet-inspired encoder-decoder neural network
+               architecture trained on modern GPUs in under 20 seconds per
+               epoch to denoise and recover the angular power spectrum
+               from simulated maps"
+        keywords: [UNet, neural architecture, GPU training]
+        evidence: "internal"
+        profiles: [ai_ml_engineer]
+
+      - id: b_utd_04
+        status: verified
+        what: "ablation studies across dropout, batch normalization, loss
+               function variants, and activation functions"
+        how: "compared MSE, normalized MSE, and Wishart losses alongside ReLU and GELU activations"
+        result: "identified the configuration with the best denoising performance"
+        text: "Ran ablation studies across dropout, batch normalization,
+               loss function variants, and activation functions, comparing
+               MSE, normalized MSE, and Wishart losses alongside ReLU and
+               GELU activations"
+        keywords: [ablation study, hyperparameter tuning]
+        evidence: "internal"
+        profiles: [ai_ml_engineer, data_scientist]
+
+      - id: b_utd_05
+        status: verified
+        what: "automated hyperparameter sweeps"
+        how: "used Hydra and shell scripting to benchmark model performance
+              across ells, detectors, and feature configurations at
+              multiple resolutions"
+        result: "made systematic model comparison repeatable across the full configuration space"
+        text: "Automated hyperparameter sweeps using Hydra and shell
+               scripting to benchmark model performance across ells,
+               detectors, and feature configurations at multiple
+               resolutions"
+        keywords: [Hydra, automation, hyperparameter sweep]
+        evidence: "internal"
+        profiles: [ai_ml_engineer, software_engineer]
+
+  - id: role_sei
+    company: "SEI Investments Company"
+    location: "Kolkata, WB"
+    start: "2021-10"
+    end: "2023-08"
+    kind: full_time
+    title:
+      default: "Data Scientist"
+    summary:
+      id: b_sei_sum
+      text: "Built automation tools and data workflows for a financial
+             services team, turning manual document and reconciliation
+             processes into faster digital systems"
+      keywords: [automation, data workflows, financial services]
+      status: verified
+    bullets:
+      - id: b_sei_01
+        status: verified
+        what: "Python-based prototype for automating document-filling"
+        how: "combined NLP libraries and OCR technology"
+        result: "reduced manual processing by 50 percent and improved data availability"
+        text: "Developed a Python-based prototype for automating
+               document-filling using NLP libraries and OCR technology,
+               reducing manual processing by 50 percent and improving data
+               availability"
+        keywords: [Python, NLP, OCR, automation]
+        evidence: "internal"
+        profiles: [data_scientist, software_engineer]
+
+      - id: b_sei_02
+        status: verified
+        what: "reconciliation workflow for diverse investor profiles"
+        how: "built it in Alteryx and coordinated it with cross-functional teams"
+        result: "boosted efficiency and integration across teams"
+        text: "Architected a reconciliation workflow for diverse investor
+               profiles using Alteryx, boosting efficiency and integration
+               across cross-functional teams"
+        keywords: [Alteryx, workflow automation, reconciliation]
+        evidence: "internal"
+        profiles: [data_scientist]
+
+      - id: b_sei_03
+        status: verified
+        what: "error-handling mechanisms for the reconciliation system"
+        how: "documented the algorithm design, implementation steps, and performance metrics"
+        result: "improved reliability and knowledge sharing across the team"
+        text: "Implemented error-handling mechanisms and documented the
+               algorithm design, implementation steps, and performance
+               metrics, improving reliability and knowledge sharing across
+               the team"
+        keywords: [error handling, documentation, reliability]
+        evidence: "internal"
+        profiles: [data_scientist, software_engineer]
+
+      - id: b_sei_04
+        status: verified
+        what: "Tableau dashboards for large-scale datasets"
+        how: "designed them to surface trends directly to business stakeholders"
+        result: "gave stakeholders actionable insights for decision-making"
+        text: "Built Tableau dashboards for large-scale datasets, giving
+               business stakeholders actionable insights for
+               decision-making"
+        keywords: [Tableau, dashboards, data visualization]
+        evidence: "internal"
+        profiles: [data_scientist]
+
+  - id: role_unl
+    company: "University of Nebraska-Lincoln"
+    location: "Remote"
+    start: "2021-05"
+    end: "2023-06"
+    kind: research
+    title:
+      default: "Research Assistant"
+    summary:
+      id: b_unl_sum
+      text: "Developed a machine learning segmentation model and benchmark
+             dataset for tracking early plant growth from time-lapse
+             images"
+      keywords: [machine learning, segmentation, agriculture]
+      status: verified
+    bullets:
+      - id: b_unl_01
+        status: verified
+        what: "EmergeNet, a novel segmentation model for agricultural data"
+        how: "collaborated with international research teams to design and train it"
+        result: "achieved 99.4 percent IoU against a 69 percent baseline for a standard UNet"
+        text: "Collaborated with international research teams to develop
+               EmergeNet, a segmentation model for agricultural data that
+               achieved 99.4 percent IoU against a 69 percent baseline for
+               a standard UNet"
+        keywords: [segmentation, computer vision, EmergeNet]
+        evidence: "https://www.frontiersin.org/journals/plant-science/articles/10.3389/fpls.2023.1084778/full"
+        profiles: [ai_ml_engineer, data_scientist]
+
+      - id: b_unl_02
+        status: verified
+        what: "UNL-MED benchmark dataset of top-view time-lapse maize coleoptile images"
+        how: "curated it from pre-emergence through roughly one inch of growth"
+        result: "provided the evaluation benchmark for EmergeNet"
+        text: "Developed the UNL-MED benchmark dataset, curating top-view
+               time-lapse images of maize coleoptiles from pre-emergence
+               through roughly one inch of growth to evaluate EmergeNet"
+        keywords: [dataset curation, benchmark, computer vision]
+        evidence: "https://plantvision.unl.edu/unl-plant-phenotyping-datasets/"
+        profiles: [ai_ml_engineer, data_scientist]
+
+      - id: b_unl_03
+        status: verified
+        what: "optimization techniques for monitoring maize coleoptile growth"
+        how: "tuned the model against observed growth metrics"
+        result: "reached a 0.99 correlation between predicted and observed growth, published in Frontiers and an e-book"
+        text: "Applied optimization techniques to monitor maize coleoptile
+               growth, reaching a 0.99 correlation between predicted and
+               observed metrics and publishing the findings in Frontiers
+               and an e-book"
+        keywords: [optimization, publication]
+        evidence: "https://www.frontiersin.org/journals/plant-science/articles/10.3389/fpls.2023.1084778/full"
+        profiles: [ai_ml_engineer, data_scientist]
+
+  - id: role_ju
+    company: "Jadavpur University"
+    location: "Kolkata, WB"
+    start: "2020-04"
+    end: "2021-08"
+    kind: research
+    title:
+      default: "Research Assistant"
+    summary:
+      id: b_ju_sum
+      text: "Researched nature-inspired optimization algorithms for
+             audio-based language identification, publishing the results
+             in IEEE journals"
+      keywords: [optimization, feature selection, publication]
+      status: verified
+    bullets:
+      - id: b_ju_01
+        status: verified
+        what: "nature-inspired meta-heuristic feature selection algorithms, BBA-LAHC and HS-NMR"
+        how: "applied them to audio-based spoken language identification"
+        result: "achieved over 98 percent test accuracy"
+        text: "Innovated nature-inspired meta-heuristic feature selection
+               algorithms, BBA-LAHC and HS-NMR, for spoken language
+               identification, achieving over 98 percent test accuracy"
+        keywords: [feature selection, meta-heuristic, signal processing]
+        evidence: "https://ieeexplore.ieee.org/abstract/document/9210572"
+        profiles: [ai_ml_engineer, data_scientist]
+
+      - id: b_ju_02
+        status: verified
+        what: "two IEEE journal papers on NLP and audio signal processing"
+        how: "documented the feature-selection research and its results"
+        result: "contributed peer-reviewed advances in spoken language identification"
+        text: "Published two IEEE journal papers documenting advances in
+               NLP and audio signal processing research"
+        keywords: [publication, NLP, signal processing]
+        evidence: "https://ieeexplore.ieee.org/abstract/document/9212354"
+        profiles: [ai_ml_engineer, data_scientist]
+
+  - id: role_bantrly_lessongen
+    kind: project
+    title:
+      default: "Bantrly Lesson Generator, K-12 ELA Content Generation System"
+    summary:
+      id: b_lessongen_sum
+      text: "Built an AI system that generates K-12 speaking lessons by
+             combining a large language model with rule-based checks for
+             safety and quality"
+      keywords: [LLM, education technology, RAG]
+      status: verified
+    bullets:
+      - id: b_lessongen_01
+        status: verified
+        what: "hybrid LLM and rule-based lesson generation system for K-12 ELA speaking practice"
+        how: "combined Groq inference, a CCSS-aligned 80-skill taxonomy, few-shot RAG, and a 9-step validated pipeline"
+        result: "produced structured, grade-appropriate lessons from three inputs"
+        text: "Built a hybrid LLM and rule-based lesson generation system
+               for K-12 ELA speaking practice, combining Groq inference, a
+               CCSS-aligned 80-skill taxonomy, few-shot RAG, and a 9-step
+               validated pipeline to produce structured, grade-appropriate
+               lessons from three inputs"
+        keywords: [Groq, RAG, CCSS, LLM, few-shot]
+        evidence: "https://github.com/aankitdas/bantrly-lesson-generator"
+        profiles: [ai_ml_engineer, software_engineer]
+
+      - id: b_lessongen_02
+        status: verified
+        what: "multi-layer guardrail system for lesson generation"
+        how: "combined pre-generation input validation, post-generation
+              content checks for vocabulary ceiling and cognitive load,
+              and a cultural bias retry loop that fed flagged terms back
+              into the prompt across up to 5 retries"
+        result: "ensured no biased lesson was ever saved"
+        text: "Designed multi-layer guardrails combining pre-generation
+               input validation, post-generation content checks for
+               vocabulary ceiling and cognitive load, and a cultural bias
+               retry loop that fed flagged terms back into the prompt
+               across up to 5 retries, ensuring no biased lesson was ever
+               saved"
+        keywords: [guardrails, content safety, retry logic]
+        evidence: "https://github.com/aankitdas/bantrly-lesson-generator"
+        profiles: [ai_ml_engineer, software_engineer]
+
+      - id: b_lessongen_03
+        status: verified
+        what: "defensive validation pipeline for non-deterministic LLM output"
+        how: "auto-corrected three distinct practice field structures
+              across model variants with reflect-stage normalization and
+              domain-specific field stripping"
+        result: "ensured clean JSON regardless of model behavior"
+        text: "Engineered a defensive validation pipeline for
+               non-deterministic LLM output, auto-correcting three distinct
+               practice field structures across model variants with
+               reflect-stage normalization and domain-specific field
+               stripping to ensure clean JSON regardless of model behavior"
+        keywords: [validation, JSON schema, LLM output]
+        evidence: "https://github.com/aankitdas/bantrly-lesson-generator"
+        profiles: [ai_ml_engineer, software_engineer]
+
+      - id: b_lessongen_04
+        status: verified
+        what: "CCSS-aligned skill taxonomy of 80 skills across 4 grade bands and 4 domains"
+        how: "added deterministic coverage tracking and cycling"
+        result: "replaced free-form LLM skill generation with controlled, measurable, progression-aware objectives"
+        text: "Built a CCSS-aligned skill taxonomy of 80 skills across 4
+               grade bands and 4 domains with deterministic coverage
+               tracking and cycling, replacing free-form LLM skill
+               generation with controlled, measurable, progression-aware
+               objectives"
+        keywords: [CCSS, skill taxonomy, coverage tracking]
+        evidence: "https://github.com/aankitdas/bantrly-lesson-generator"
+        profiles: [ai_ml_engineer, data_scientist]
+
+      - id: b_lessongen_05
+        status: verified
+        what: "6-tab Gradio UI on Hugging Face Spaces"
+        how: "combined a student-facing step-by-step lesson experience, a
+              coverage heatmap, a skill taxonomy browser, and a guardrail
+              inspector"
+        result: "gave every view live updates after each generation"
+        text: "Deployed a 6-tab Gradio UI on Hugging Face Spaces combining
+               a student-facing step-by-step lesson experience, a coverage
+               heatmap, a skill taxonomy browser, and a guardrail
+               inspector, giving every view live updates after each
+               generation"
+        keywords: [Gradio, Hugging Face Spaces, deployment]
+        evidence: "https://huggingface.co/spaces/aankitdas/bantrly-lesson-generator"
+        profiles: [software_engineer, ai_ml_engineer]
+
+  - id: role_docintel
+    kind: project
+    title:
+      default: "Document Intelligence Platform, Production RAG System"
+    summary:
+      id: b_docintel_sum
+      text: "Built a retrieval-augmented generation system that lets users
+             ask questions in plain language and get answers grounded in
+             their own documents"
+      keywords: [RAG, document QA, LLM]
+      status: verified
+    bullets:
+      - id: b_docintel_01
+        status: verified
+        what: "production-grade retrieval-augmented generation system"
+        how: "combined local embedding models Ollama and Sentence-Transformers,
+              Chroma DB vector storage, and the Groq llama-3.1-8b-instant LLM API"
+        result: "delivered intelligent document question-answering"
+        text: "Engineered a production-grade retrieval-augmented generation
+               system combining local embedding models Ollama and
+               Sentence-Transformers, Chroma DB vector storage, and the
+               Groq llama-3.1-8b-instant LLM API, delivering intelligent
+               document question-answering"
+        keywords: [RAG, Ollama, Chroma DB, Groq]
+        evidence: "https://huggingface.co/spaces/aankitdas/doc-intelligence-rag"
+        profiles: [ai_ml_engineer, software_engineer]
+
+      - id: b_docintel_02
+        status: verified
+        what: "modular Python architecture of 5 independent modules: chunker, embeddings, vector store, llm, and pipeline"
+        how: "separated each concern into its own swappable component"
+        result: "improved testability and maintainability aligned with software engineering best practices"
+        text: "Designed a modular Python architecture of 5 independent
+               modules, chunker, embeddings, vector store, llm, and
+               pipeline, improving testability and maintainability aligned
+               with software engineering best practices"
+        keywords: [modular architecture, Python, testability]
+        evidence: "https://huggingface.co/spaces/aankitdas/doc-intelligence-rag"
+        profiles: [software_engineer, ai_ml_engineer]
+
+      - id: b_docintel_03
+        status: verified
+        what: "FastAPI REST endpoints"
+        how: "added async request handling, Pydantic type safety, health checks, and structured logging"
+        result: "delivered production observability"
+        text: "Implemented FastAPI REST endpoints with async request
+               handling, Pydantic type safety, health checks, and
+               structured logging for production observability"
+        keywords: [FastAPI, Pydantic, observability]
+        evidence: "https://huggingface.co/spaces/aankitdas/doc-intelligence-rag"
+        profiles: [software_engineer]
+
+      - id: b_docintel_04
+        status: verified
+        what: "semantic chunking pipeline with 500-token chunks and 50-token overlap"
+        how: "used PyPDF2 extraction to generate 768-dimensional embeddings for cosine similarity retrieval"
+        result: "delivered under 10ms latency on over 100 document chunks"
+        text: "Built a semantic chunking pipeline with 500-token chunks and
+               50-token overlap, using PyPDF2 extraction to generate
+               768-dimensional embeddings for cosine similarity retrieval
+               under 10ms latency on over 100 document chunks"
+        keywords: [chunking, embeddings, retrieval latency]
+        evidence: "https://huggingface.co/spaces/aankitdas/doc-intelligence-rag"
+        profiles: [ai_ml_engineer, data_scientist]
+
+      - id: b_docintel_05
+        status: verified
+        what: "containerized deployment"
+        how: "used Docker multi-stage builds and automated CI/CD via GitHub Actions"
+        result: "hosted the app on Hugging Face Spaces with serverless scaling"
+        text: "Deployed a containerized application using Docker
+               multi-stage builds and automated CI/CD via GitHub Actions,
+               hosting it on Hugging Face Spaces with serverless scaling"
+        keywords: [Docker, GitHub Actions, deployment]
+        evidence: "https://huggingface.co/spaces/aankitdas/doc-intelligence-rag"
+        profiles: [software_engineer]
+
+      - id: b_docintel_06
+        status: verified
+        what: "cost-optimization strategy across the stack"
+        how: "paired local embeddings for privacy and efficiency with
+              free-tier LLM APIs for fast inference and persistent vector
+              storage for retrieval performance"
+        result: "kept the whole system free to run"
+        text: "Demonstrated a cost-optimization strategy, pairing local
+               embeddings for privacy and efficiency with free-tier LLM
+               APIs for fast inference and persistent vector storage for
+               retrieval performance"
+        keywords: [cost optimization, local inference]
+        evidence: "https://huggingface.co/spaces/aankitdas/doc-intelligence-rag"
+        profiles: [ai_ml_engineer, data_scientist]
+
+publications:
+  - id: pub_ieee_lang
+    text: "A hybrid meta-heuristic feature selection method for
+           identification of Indian spoken languages from audio signals."
+    authors_bold: "Das, A."
+    venue: "IEEE Access"
+    url: "https://ieeexplore.ieee.org/abstract/document/9210572"
+
+  - id: pub_emergenet
+    text: "EmergeNet: A novel deep-learning based ensemble segmentation
+           model for emergence timing detection of coleoptile."
+    authors_bold: "Das, A."
+    venue: "Frontiers in Plant Science"
+    url: "https://www.frontiersin.org/journals/plant-science/articles/10.3389/fpls.2023.1084778/full"
+
+  - id: pub_hs_nmr
+    text: "Hybrid feature selection method based on harmony search and
+           naked mole-rat algorithms for spoken language identification
+           from audio signals."
+    authors_bold: "Das, A."
+    venue: "IEEE Access"
+    url: "https://ieeexplore.ieee.org/abstract/document/9212354"
+
+  - id: pub_flowerphenonet
+    text: "Flowerphenonet: Automated flower detection from multi-view image
+           sequences using deep neural networks for temporal plant
+           phenotyping analysis."
+    authors_bold: "Das, A."
+    venue: "MDPI"
+    url: "https://www.mdpi.com/2072-4292/14/24/6252"

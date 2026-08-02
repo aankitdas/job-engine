@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run python -m jobengine.resume.slop_lint --changed"
+          }
+        ]
+      }
+    ]
+  }
+}

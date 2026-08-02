@@ -14,15 +14,15 @@ Read PROGRESS.md, then specs/NN-name.md. Plan first, do not write code yet.
 
 ## Phase A: Foundation
 
-- [ ] **A1. Data model** (`specs/00-data-model.md`)
+- [x] **A1. Data model** (`specs/00-data-model.md`)
   Done: `jobengine.db init` creates the schema idempotently, `tests/test_db.py`
   passes including the `first_seen_at` immutability test.
 
-- [ ] **A2. Bullet bank schema + your bank** (`specs/01-bullet-bank.md`)
+- [x] **A2. Bullet bank schema + your bank** (`specs/01-bullet-bank.md`)
   Done: `bank validate` reports zero errors and prints a per-profile count.
   Longest manual step. Budget two hours. Do not let an agent speed-run it.
 
-- [ ] **A3. Slop linter** (`specs/02-slop-linter.md`)
+- [x] **A3. Slop linter** (`specs/02-slop-linter.md`)
   Done: flags a bad fixture, passes a real bank bullet, PostToolUse hook stops
   erroring.
 
