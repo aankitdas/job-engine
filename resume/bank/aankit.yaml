@@ -16,7 +16,10 @@ education:
     field: "Electronics and Communication Engineering"
     institution: "University of Calcutta"
     gpa: "3.7/4.0"
-    status: "Status - Graduated"
+    # Intentional override of spec 01's 3-year rule (year if within 3 yrs,
+    # else "Status - Graduated"): shows the literal date instead. Personal
+    # choice, confirmed with the user, not a bug. See docs/decisions.md.
+    status: "Sept 2020"
     requires_degree_profiles: [ai_ml_engineer, software_engineer, data_scientist]
 
 certificates: []

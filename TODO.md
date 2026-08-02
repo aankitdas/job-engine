@@ -26,8 +26,19 @@ Read PROGRESS.md, then specs/NN-name.md. Plan first, do not write code yet.
   Done: flags a bad fixture, passes a real bank bullet, PostToolUse hook stops
   erroring.
 
-- [ ] **A4. Docx renderer** (`specs/03-renderer.md`)
+- [x] **A4. Docx renderer** (`specs/03-renderer.md`)
   Done: golden test passes on font, sizes, spacing, tabs, margins.
+
+- [ ] **A4b. PDF conversion** (`specs/03-renderer.md`, "PDF" section)
+  Render .docx, then convert with LibreOffice headless (use the pptx
+  skill's wrapper in the sandbox, bare `soffice` hangs). Blocks D2 (PDF
+  geometry for front-loading); must land before the rubric phase starts.
+
+- [ ] **A4c. Watermarking** (`specs/03-renderer.md`, "Watermarking" section)
+  Diagonal "DRAFT - CONTAINS UNBUILT WORK" stamp on any render with a
+  `speculative` bullet, `preview` code path, writes only to
+  `resume/rendered/preview/`. No urgency: the real bank has zero
+  speculative bullets right now, so nothing exercises this path yet.
 
 ## Phase B: Ingestion
 

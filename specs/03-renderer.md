@@ -26,12 +26,24 @@ Page: US Letter, margins 0.5in (720 twips) on all four sides.
 
 **Tab stop: exactly one right tab at 7.5in (10800 twips).** The source
 template has three inconsistent tab stops (7.5in, 6.5in, and a center tab at
-6.8in), which is why dates do not line up. Normalize to one.
+6.8in), which is why dates do not line up. Normalize to one. The same tab
+stop is used for education's degree/status line, not hardcoded spaces
+(hardcoded spaces only line up for one exact text length; long degree text
+needs the same right-alignment mechanism as the date column).
 
 **Alignment: left, not justified.** The source template uses justified
 (`w:jc="both"`). Change it.
 
-Colors: black only, except phone, email, and link runs which may be blue.
+**Contact line hyperlinks.** Phone and email render as plain black text, not
+links, matching the template. LinkedIn/GitHub/Portfolio/Scholar render as
+short labels ("LinkedIn", "GitHub", "Portfolio", "Scholar"), matching Lee's
+own template example (short hyperlinked labels, not full URL strings), each
+a real docx hyperlink relationship pointing at the corresponding
+`identity.toml` URL. The raw URL string must never appear as visible text.
+
+Colors: black only, except the LinkedIn/GitHub/Portfolio/Scholar hyperlink
+runs, which render blue with an underline (color `467886`, matching the
+template's own `Hyperlink` character style). Phone and email stay black.
 
 ## Structure
 

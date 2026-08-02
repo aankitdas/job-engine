@@ -24,6 +24,19 @@ the only line of defense against a future bug in a raw `UPDATE`.
 **D4. SQLite. The spreadsheet is an export, not a system of record.**
 
 **D5. Resume content is data; rendering is deterministic.**
+Addendum (A4): confirmed both directions of this hold in `render.py`.
+`Education.status` is treated as a literal opaque string the renderer just
+prints, e.g. via a tab stop to the right margin; it never computes "Status
+- Graduated" vs. a date itself, or does any date math on it. The bank
+content decides what displays, the renderer only lays it out. This is also
+why `resume/bank/aankit.yaml`'s BTech entry can carry `status: "Sept 2020"`
+instead of spec 01's stated 3-year rule ("year if within 3 yrs, else
+'Status - Graduated'") without that being a bug: it's the same kind of
+personal content call as the other CV-vs-docx conflicts resolved during A2
+seeding (BTech end date, citation count, the "October 202" typo), just
+expressed directly in the bank's `status` field rather than in PROGRESS.md's
+known-issues log. Confirmed by asking; do not "fix" it to match the rule in
+a future session that re-reads spec 01 literally.
 
 **D6. The anti-slop rule is a linter, not a prompt instruction.**
 Wired as a PostToolUse hook so failures feed back automatically.
