@@ -11,6 +11,13 @@ proxies, 429s, and constant breakage for worse data.
 **D2. Company slugs are a maintained registry, not a search.**
 Neither API supports cross-company search. Curated seed plus bulk harvest,
 validated weekly, dead slugs marked rather than retried.
+Addendum (B1): `source` is `seed` \| `harvest` \| `manual`, three distinct
+provenances, not two; a manually-`add`ed company is not folded into `seed`.
+Bulk harvest itself (Common Crawl CDX scan) is deferred, not built; `seed`
++ `add` + `validate` are enough for B1. `registry seed`/`add` insert new
+companies only (`INSERT OR IGNORE`) and never touch an existing row, so a
+company `validate` has already promoted to `active` cannot be silently
+reset to `unverified` by re-running seed.
 
 **D3. `first_seen_at` is computed by us.**
 Greenhouse `updated_at` is not a post date. Snapshot history cannot be

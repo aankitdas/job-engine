@@ -21,7 +21,7 @@ SQLite schema, migrations, and typed accessors. No business logic.
 | ats | TEXT | `greenhouse` \| `ashby` |
 | name | TEXT | from API response |
 | status | TEXT | `active` \| `dead` \| `unverified` |
-| source | TEXT | `seed` \| `harvest` |
+| source | TEXT | `seed` \| `harvest` \| `manual` |
 | first_seen_at | TEXT | ISO8601 UTC |
 | last_ok_at | TEXT | last successful fetch |
 | last_checked_at | TEXT | |

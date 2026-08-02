@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS companies (
     ats                   TEXT NOT NULL CHECK (ats IN ('greenhouse', 'ashby')),
     name                  TEXT NOT NULL,
     status                TEXT NOT NULL CHECK (status IN ('active', 'dead', 'unverified')),
-    source                TEXT NOT NULL CHECK (source IN ('seed', 'harvest')),
+    source                TEXT NOT NULL CHECK (source IN ('seed', 'harvest', 'manual')),
     first_seen_at         TEXT NOT NULL,
     last_ok_at            TEXT,
     last_checked_at       TEXT,

@@ -1,0 +1,57 @@
+# Hand-curated seed list for the company registry (specs/04-sources.md).
+# Highest-signal source: companies worth applying to, picked by hand rather
+# than harvested. This is a small starter set, not the real 150-300 list;
+# expand it directly, one entry per company.
+#
+# ats/slug pairs are best-effort from public knowledge, not verified against
+# a live probe. Companies migrate ATS platforms constantly (see D2 in
+# docs/decisions.md), so `registry validate` marking an entry `dead` on
+# first probe is expected, not a bug in this file.
+
+- ats: greenhouse
+  slug: stripe
+  name: Stripe
+- ats: greenhouse
+  slug: airbnb
+  name: Airbnb
+- ats: greenhouse
+  slug: doordashusa
+  name: DoorDash
+- ats: greenhouse
+  slug: pinterest
+  name: Pinterest
+- ats: greenhouse
+  slug: discord
+  name: Discord
+- ats: greenhouse
+  slug: robinhood
+  name: Robinhood
+- ats: greenhouse
+  slug: figma
+  name: Figma
+- ats: greenhouse
+  slug: brex
+  name: Brex
+- ats: ashby
+  slug: notion
+  name: Notion
+- ats: ashby
+  slug: ramp
+  name: Ramp
+- ats: ashby
+  slug: linear
+  name: Linear
+
+# AI-native / ML-focused
+- ats: greenhouse
+  slug: anthropic
+  name: Anthropic
+- ats: ashby
+  slug: openai
+  name: OpenAI
+- ats: greenhouse
+  slug: scaleai
+  name: Scale AI
+- ats: ashby
+  slug: cohere
+  name: Cohere

@@ -4,7 +4,9 @@
 the end via `/checkpoint`. Do not rely on memory of previous sessions.**
 
 Last updated: 2026-08-02
-Current task: A4b (PDF conversion, specs/03-renderer.md "PDF" section), not started
+Current task: B2 (fetch and diff, specs/04-sources.md) or A4b (PDF conversion,
+specs/03-renderer.md "PDF" section), not started; either is unblocked, ask
+which to do next
 
 ---
 
@@ -18,7 +20,7 @@ Current task: A4b (PDF conversion, specs/03-renderer.md "PDF" section), not star
 | A4 | Docx renderer + golden typography test | done | see note below, PDF/watermark split out |
 | A4b | PDF conversion (LibreOffice headless) | not started | blocks D2 |
 | A4c | Watermarking (speculative preview) | not started | no urgency, no speculative bullets exist yet |
-| B1 | ATS clients + registry | not started | |
+| B1 | ATS clients + registry | done | clients+registry only, sync.py's fetch/diff loop is B2 |
 | B2 | Fetch and diff | not started | |
 | B3 | Filters + routing | not started | |
 | C1 | LLM router | not started | |
@@ -176,6 +178,56 @@ Status values: `not started` | `in progress` | `blocked` | `done`
   user's template shows no visible difference except the three deliberate
   fixes") is a manual check nothing in this repo can run for you.
 
+- `src/jobengine/sources/models.py`: `JobPosting`, the normalized pydantic
+  model both ATS clients return. Not yet mapped onto the `jobs` table;
+  that mapping (plus `content_hash` computation and the diff loop) is B2.
+- `src/jobengine/sources/_client.py`: shared `httpx.AsyncClient` factory
+  (20s timeout, descriptive User-Agent), a process-wide
+  `asyncio.Semaphore(10)` concurrency cap, and `retryable()`, a `tenacity`
+  decorator (3 attempts, exponential backoff, retries only on 5xx/timeout,
+  reraises immediately on anything else including 404) shared by both
+  clients so the retry policy is defined once.
+- `src/jobengine/sources/greenhouse.py` and `ashby.py`: each exposes
+  `async fetch_board(slug, *, transport=None) -> list[JobPosting]`. The
+  `transport` kwarg exists solely so tests can inject `httpx.MockTransport`
+  without a real network call. Greenhouse strips tags before unescaping
+  HTML entities, not the other way around, an ordering bug the tests caught
+  immediately (unescaping first turns an escaped `&lt;fast&gt;` into a
+  literal `<fast>` that the tag-stripping regex then eats as if it were a
+  real tag). Ashby filters out `isListed: false` postings and uses the
+  posting's `id` field for `ats_job_id`, which spec 04's Ashby field list
+  omits but the real API returns; confirmed by asking before assuming.
+- `src/jobengine/sources/registry.py`: `seed()`, `add()`, `validate()`, plus
+  a self-hosted CLI (`uv run python -m jobengine.sources.registry
+  {seed,add,validate}`). `seed`/`add` both go through
+  `_insert_new_company()`, an `INSERT OR IGNORE`, deliberately not
+  `jobengine.db.models.upsert_company`: that helper's `ON CONFLICT DO
+  UPDATE` unconditionally overwrites `status`, so re-running `seed` against
+  an already-`active` company would silently reset it back to
+  `unverified`, destroying validation history. `validate()` buckets each
+  probe into `active_ok` / `active_zero` / `dead` / `retry` per spec 04's
+  four cases and takes an optional `fetchers` dict so tests can inject fake
+  async fetchers instead of mocking HTTP transport for status-transition
+  logic. A company that 404s does not flip to `dead` until the 3rd
+  consecutive failure; below that threshold its status is left exactly as
+  it was (spec 04 only specifies the status change at the threshold).
+- `config/seed_companies.yaml`: 15 real companies (Stripe, Airbnb,
+  DoorDash, Pinterest, Discord, Robinhood, Figma, Brex, Notion, Ramp,
+  Linear, Anthropic, OpenAI, Scale AI, Cohere), not just test fixtures.
+  Verified against the live Greenhouse/Ashby APIs during this session
+  (`registry seed` + `registry validate` against a scratch db, not just
+  mocked tests): 14 of 15 resolved on the first guess, `doordash` 404'd and
+  turned out to be `doordashusa`, fixed in the file itself. This is a small
+  starter set, not the real 150-300 list spec 04 calls for; expand by hand.
+- `companies.source` CHECK constraint widened from `('seed', 'harvest')` to
+  `('seed', 'harvest', 'manual')` in `schema.sql`, plus the matching column
+  note in specs/00-data-model.md, so `registry add`'s manually-registered
+  companies get their own source value instead of being folded into
+  `seed`. `data/jobengine.db` had zero rows in `companies`/`jobs` at the
+  time (verified before touching it), so this was a drop-and-`db init`,
+  not a real migration; no `schema_migrations` bump needed since there was
+  no data to migrate.
+
 ---
 
 ## Known issues and deferred work
@@ -251,6 +303,21 @@ Status values: `not started` | `in progress` | `blocked` | `done`
   `slop_lint.py`) is hardcoded to `resume/bank/*.yaml`, the only lint
   target that exists pre-D4. Extend it once D4 writes variant files
   elsewhere.
+- `registry.py`'s `harvest` population path (bulk slug extraction from the
+  Common Crawl CDX index, spec 04's ~95k-identifier path) is not built.
+  Deferred out of B1 by explicit request; `seed` + `add` + `validate` alone
+  satisfy B1's DoD. Revisit as its own item if the 15-company starter seed
+  list proves too thin once B2/B3 need real volume.
+- `src/jobengine/sources/models.py`'s `JobPosting.content_hash` does not
+  exist; hashing for the "did this posting's content change" edit-event
+  check in spec 04's sync pseudocode belongs to B2 (the diff logic), not
+  B1 (the clients). Don't be surprised it's missing when B2 starts.
+- `_client.py`'s `retryable()` uses `wait_exponential(multiplier=0.5,
+  max=8)`, deliberately smaller than a typical production backoff, chosen
+  so `test_greenhouse_retries_on_5xx_then_succeeds` doesn't add much wall
+  time. Spec 04 only says "exponential backoff" with no concrete numbers,
+  so this was a free choice, not a spec compromise; revisit if real-world
+  5xx behavior from Greenhouse/Ashby suggests otherwise.
 
 ---
 
@@ -322,6 +389,45 @@ Status values: `not started` | `in progress` | `blocked` | `done`
   specifically so H008 could get a real end-to-end test (YAML on disk,
   loaded through the actual loader) against a small fixture bank, not just
   an in-memory fabricated id set.
+- `companies.source` CHECK widened to `('seed', 'harvest', 'manual')`
+  instead of mapping `registry add`'s manual entries onto `source='seed'`.
+  Confirmed by asking; specs/00-data-model.md's column note updated to
+  match, `data/jobengine.db` dropped and re-`init`'d (it had zero rows, so
+  no migration needed, just a schema.sql edit).
+- B1's scope is `greenhouse.py`, `ashby.py`, and `registry.py` (seed, add,
+  validate) only, not `sync.py`'s fetch-and-diff loop, even though spec 04
+  groups all four under one module and TODO.md's B1 "Done" line literally
+  says `sources.sync`. That line is read as shorthand for "the registry
+  side of the pipeline reports OK/dead counts," met here via `registry
+  validate`; spec 04's own CLI section already lists `registry validate`
+  and `sync` as separate commands, and B2's own DoD ("first_seen_at delta
+  ... put this on a schedule") is unambiguously about the jobs-diffing
+  half. Confirmed by asking (session-start scoping question) before
+  writing code, not decided silently.
+- Common Crawl harvest (spec 04's bulk slug-extraction path) deferred out
+  of B1 entirely, not stubbed. Confirmed by asking; `seed` + `add` +
+  `validate` alone satisfy B1's stated DoD.
+- Ashby's `ats_job_id` is sourced from the posting's `id` field, which spec
+  04's Ashby field list never mentions but the real API returns alongside
+  every field the spec does list. Confirmed by asking rather than guessing
+  a fallback key (e.g. hashing `title`+`publishedAt`), since `ats_job_id`
+  is part of the `jobs` table's uniqueness constraint and getting it wrong
+  would silently duplicate or drop rows once B2 wires this up.
+- `registry.py`'s `seed()`/`add()` use a dedicated `INSERT OR IGNORE` path
+  (`_insert_new_company()`), not `jobengine.db.models.upsert_company`. Not
+  a stylistic choice: `upsert_company`'s `ON CONFLICT DO UPDATE` always
+  overwrites `status`, so reusing it here would mean every re-run of
+  `registry seed` resets already-validated companies back to
+  `unverified`, silently destroying `validate`'s accumulated state. Caught
+  during planning, not after a bug, and covered by
+  `test_seed_is_idempotent_and_does_not_reset_validated_status`.
+- A company that 404s stays at whatever status it already had
+  (`unverified` or `active`) until its 3rd consecutive failure flips it to
+  `dead`; spec 04 only states the status change at the threshold ("mark
+  `dead` at 3"), so no intermediate demotion (e.g. `active` -> `unverified`
+  on the 1st or 2nd failure) was invented. Not asked separately; read as
+  the literal, more conservative interpretation of the spec text rather
+  than a judgment call worth interrupting for.
 
 ---
 
@@ -329,6 +435,33 @@ Status values: `not started` | `in progress` | `blocked` | `done`
 
 (Newest first. Date, task id, what changed, what to do next.)
 
+- 2026-08-02, B1 (done): Implemented `src/jobengine/sources/{models,
+  _client,greenhouse,ashby,registry}.py` and `tests/test_sources.py` (18
+  tests, written and confirmed all-red on `ImportError` before
+  implementation per hard rule 7's spirit, even though `sources/` isn't
+  literally in that rule's `pipeline/`, `resume/`, `rubric/` list). Widened
+  `companies.source` CHECK to `('seed', 'harvest', 'manual')` (schema.sql +
+  specs/00-data-model.md), confirmed by asking, `data/jobengine.db` dropped
+  and re-`init`'d since it had zero rows. Seeded `config/seed_companies.yaml`
+  with 15 real companies and verified it end to end against the live
+  Greenhouse/Ashby APIs, not just mocked tests: `registry seed` +
+  `registry validate` against a scratch db, 14/15 active on the first
+  guess, `doordash` 404'd and was actually `doordashusa`, fixed in the seed
+  file itself before finalizing. Caught one real bug via the tests
+  themselves (not post-hoc): Greenhouse's HTML-to-plaintext conversion was
+  unescaping entities before stripping tags, so an escaped `&lt;fast&gt;`
+  became a literal `<fast>` that the tag-stripper then ate as if it were a
+  real tag; fixed by reversing the order. Explicitly scoped B1 down to
+  clients + registry only (not `sync.py`'s fetch-and-diff loop, that's B2)
+  and deferred the Common Crawl harvest path entirely, both confirmed by
+  asking before writing code. `uv run pytest` 88/88 passing; `ruff
+  check`/`format --check` clean on everything touched this session (3
+  pre-existing `RUF059` findings in `tests/test_render.py` are unrelated,
+  not introduced here, left alone). TODO.md B1 checked off with a note on
+  the `sources.sync`-vs-`registry validate` DoD wording gap. Next: your
+  call between B2 (fetch-and-diff, unblocked, `sources/` now exists) and
+  A4b (PDF conversion, unblocked, blocks D2) per the session protocol's
+  one-task-at-a-time rule.
 - 2026-08-02, A3 (done): Implemented `src/jobengine/resume/slop_lint.py`
   (lenient `LintTarget` schema, `Report` with errors/warnings/fatal,
   `lint_target`/`lint_path`, full CLI) and `tests/test_slop_lint.py` (22

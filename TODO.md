@@ -45,8 +45,10 @@ Read PROGRESS.md, then specs/NN-name.md. Plan first, do not write code yet.
 Start B1 and B2 as soon as A1 is green, even if nothing downstream exists.
 Snapshot history cannot be backfilled.
 
-- [ ] **B1. ATS clients + slug registry** (`specs/04-sources.md`)
+- [x] **B1. ATS clients + slug registry** (`specs/04-sources.md`)
   Done: `sources.sync` populates `companies`, reports OK and dead counts.
+  (Met via `sources.registry seed`/`validate`, not `sources.sync`; see
+  PROGRESS.md, sync.py's fetch+diff loop is B2's scope.)
 
 - [ ] **B2. Fetch and diff**
   Done: two runs a day apart show a non-zero `first_seen_at` delta.
