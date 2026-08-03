@@ -69,12 +69,18 @@ Snapshot history cannot be backfilled.
   not per-job filtering. Not scoped or planned yet, just flagged so it
   doesn't get lost.
 
-- [ ] **B3. Deterministic filters + profile routing**
+- [x] **B3. Deterministic filters + profile routing**
   Done: filter logic (title-to-profile, location/remote, employment type,
   dedup vs `applications`) is grounded in real title/location/department
   distributions and you agree with the survivors on inspection. The
   300-500/day number itself is explicitly NOT this item's target; see the
   open item below.
+  (Signed off 2026-08-03 after a 30-title then two 10-per-profile random
+  visual samples surfaced and fixed real gaps: mis-routed titles,
+  above-target-seniority titles, and non-US locations, including a
+  205-job hole in the location allowlist caught by checking the
+  "ambiguous" bucket against real data rather than trusting the design.
+  See PROGRESS.md and D23 + its 3 addenda in docs/decisions.md.)
 
 - [ ] **B3-followup. Calibrate the daily filter-survivor cap**
   Deferred out of B3 on purpose (see D23 in docs/decisions.md): today's db

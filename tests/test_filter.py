@@ -12,10 +12,13 @@ import pytest
 from jobengine.db.migrate import connect, init
 from jobengine.db.models import Job
 from jobengine.pipeline.filter import (
+    classify_location,
+    is_above_target_seniority,
     is_already_applied,
     is_citizenship_or_clearance_required,
     is_excluded_employment_type,
     is_remote,
+    is_us_location,
     load_filter_config,
     matches_profiles,
 )
@@ -293,3 +296,100 @@ def test_citizenship_clearance_eeoc_sponsorship_boilerplate_is_not_a_false_posit
         "Women in Tech and Pride@Company."
     )
     assert is_citizenship_or_clearance_required(description, config) is False
+
+
+# --- second round of exclusion_keywords, from the visual sample check ---
+
+
+def test_user_researcher_excluded_from_ai_ml_engineer(config):
+    job = _job(title="User Researcher, AI Evaluations")
+    assert "ai_ml_engineer" not in matches_profiles(job, config)
+
+
+def test_people_research_scientist_excluded_from_data_scientist(config):
+    # This title never matched ai_ml_engineer in the first place (it
+    # contains "Research", not "Researcher"): only data_scientist's bare
+    # "scientist" alias hits it, so the exclusion has to live there too.
+    job = _job(title="People Research Scientist, Recruiting")
+    assert "data_scientist" not in matches_profiles(job, config)
+
+
+def test_ai_success_engineer_excluded_from_software_engineer(config):
+    job = _job(title="AI Success Engineer - Healthcare & Life Sciences")
+    assert "software_engineer" not in matches_profiles(job, config)
+
+
+# --- is_above_target_seniority: cross-profile hard exclude ---
+
+
+def test_seniority_excludes_manager_ii_title(config):
+    title = "Manager II, Machine Learning Engineering"
+    assert is_above_target_seniority(title, config) is True
+
+
+def test_seniority_excludes_engineering_manager(config):
+    assert is_above_target_seniority("Engineering Manager", config) is True
+
+
+def test_seniority_excludes_vp_of_engineering(config):
+    assert is_above_target_seniority("VP of Engineering", config) is True
+
+
+def test_seniority_does_not_exclude_senior_software_engineer(config):
+    assert is_above_target_seniority("Senior Software Engineer", config) is False
+
+
+def test_seniority_does_not_exclude_staff_ai_engineer(config):
+    assert is_above_target_seniority("Staff AI Engineer", config) is False
+
+
+# --- is_us_location: cross-profile hard requirement (remote OR US) ---
+
+
+def test_us_location_excludes_sao_paulo(config):
+    job = _job(location_raw="São Paulo, Brazil", remote=None)
+    assert is_us_location(job, config) is False
+
+
+def test_us_location_excludes_seoul(config):
+    job = _job(location_raw="Seoul, South Korea", remote=None)
+    assert is_us_location(job, config) is False
+
+
+def test_us_location_excludes_singapore(config):
+    job = _job(location_raw="Singapore", remote=None)
+    assert is_us_location(job, config) is False
+
+
+def test_us_location_excludes_apac(config):
+    job = _job(location_raw="APAC", remote=None)
+    assert is_us_location(job, config) is False
+
+
+def test_us_location_excludes_greater_china_region(config):
+    job = _job(location_raw="Greater China Region", remote=None)
+    assert is_us_location(job, config) is False
+
+
+def test_us_location_passes_dallas_tx(config):
+    job = _job(location_raw="Dallas, TX", remote=None)
+    assert is_us_location(job, config) is True
+
+
+def test_us_location_passes_remote(config):
+    job = _job(location_raw="Remote", remote=None)
+    assert is_us_location(job, config) is True
+
+
+def test_us_location_excludes_and_logs_empty_location(config):
+    job = _job(location_raw=None, remote=None)
+    assert is_us_location(job, config) is False
+    assert classify_location(job, config) == "empty_location"
+
+
+def test_us_location_excludes_and_logs_garbage_location(config):
+    # "LOCATION" is a real value seen in data/jobengine.db: not empty, but
+    # not a recognizable place name either. Must not silently pass.
+    job = _job(location_raw="LOCATION", remote=None)
+    assert is_us_location(job, config) is False
+    assert classify_location(job, config) == "ambiguous_unparseable"

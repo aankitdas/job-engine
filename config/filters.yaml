@@ -19,6 +19,16 @@ profiles:
                                # docs/decisions.md D23 addendum for the
                                # false-positive tradeoff (some UX/product
                                # researcher titles also match)
+    # The false positives the addendum above warned about, made concrete:
+    # bare "researcher" also matches non-ML research roles. Same
+    # exclusion-keyword pattern as software_engineer below, no override
+    # list needed (no case where these should still pass for this profile).
+    exclusion_keywords:
+      - "user researcher"
+      - "ux research"
+      - "market research"
+      - "policy research"
+      - "people research"
   software_engineer:
     title_aliases:
       - "software engineer"
@@ -41,6 +51,10 @@ profiles:
       - "systems administrator"
       - "field engineer"
       - "forward deployed"
+      - "success engineer"    # customer-facing/support title, e.g. "AI
+                               # Success Engineer - Healthcare & Life
+                               # Sciences", not core software engineering
+      - "customer engineer"
     exclusion_override_keywords:
       - "software"
   data_scientist:
@@ -51,10 +65,157 @@ profiles:
       - "scientist"           # bare form: real hits are mostly research
                                # scientist variants, some non-ML noise
                                # (e.g. "People Research Scientist, Recruiting")
+    # Same list as ai_ml_engineer's, and for the same reason: bare
+    # "scientist" pulls in non-ML "research scientist" titles from other
+    # domains. Not in the original request (which named only
+    # ai_ml_engineer), but "People Research Scientist, Recruiting" only
+    # ever matched data_scientist's bare "scientist" alias, never
+    # ai_ml_engineer's "researcher" (the words differ: "Research
+    # Scientist" contains "research", not "researcher"), so adding this
+    # list to ai_ml_engineer alone would not have caught it. Added here too
+    # so it actually does.
+    exclusion_keywords:
+      - "user researcher"
+      - "ux research"
+      - "market research"
+      - "policy research"
+      - "people research"
+
+# Hard exclude, applied across ALL profiles, not per-profile: unlike
+# software_engineer's exclusion_keywords, there is no override list here.
+# Confirmed by asking: no title shape exists where a Manager/Director/VP/
+# Chief title should still count as an IC target role, unlike "Forward
+# Deployed Software Engineer" overriding "forward deployed" above.
+# Word-boundary matching means "Senior"/"Staff"/"Lead" IC titles are
+# unaffected (none of these keywords are substrings of those words).
+seniority:
+  exclude_title_keywords:
+    - "manager"
+    - "director"
+    - "head of"
+    - "vp"
+    - "vice president"
+    - "chief"
 
 location:
   remote_synonyms:
     - "remote"
+  # Informal US city shorthand seen for real in location_raw (e.g. "CHI,
+  # SF, NYC, SEA, US-Remote"). Word-boundary, case-insensitive. Grow by
+  # hand if a new one surfaces.
+  us_informal_city_abbreviations:
+    - "CHI"
+    - "SF"
+    - "NYC"
+    - "SEA"
+    - "ATL"
+  # Major US city/region full names that appear bare, with no state suffix
+  # at all ("San Francisco" alone, not "San Francisco, CA"). Found by
+  # actually checking what fell into "ambiguous_unparseable" against the
+  # real db rather than assuming the state-code/abbreviation rules above
+  # were sufficient: "San Francisco" (148 occurrences among alias-matched
+  # jobs alone), "San Francisco Bay Area"/"Bay Area", "Seattle", and
+  # "Chicago" were the real, material gaps, not a hypothetical one. Most
+  # other major US cities are already covered indirectly, either by
+  # sharing a name with a US state ("New York") or by always appearing
+  # with a state code in this data ("Atlanta, GA", never bare "Atlanta").
+  us_major_city_names:
+    - "san francisco"
+    - "bay area"
+    - "seattle"
+    - "chicago"
+  # Used only to distinguish a confirmed-non-US location from a genuinely
+  # ambiguous/unparseable one (see filter.py's classify_location and its
+  # "ambiguous_unparseable" bucket, which is logged, not silently dropped
+  # in either direction). Not exhaustive by design; grown from what's
+  # actually in data/jobengine.db's 725 distinct location_raw values,
+  # plus "apac"/"greater china"/"southern europe" added per explicit
+  # request even though none of the three currently appear in the real
+  # 3834-job dataset (verified directly; flagged to the user as a
+  # discrepancy from their stated expectation). "São Paulo", "Seoul", and
+  # "Singapore" DO appear for real and are covered below.
+  non_us_signals:
+    - "united kingdom"
+    - "london"
+    - "england"
+    - "ireland"
+    - "dublin"
+    - "germany"
+    - "berlin"
+    - "hamburg"
+    - "munich"
+    - "france"
+    - "paris"
+    - "spain"
+    - "madrid"
+    - "barcelona"
+    - "italy"
+    - "milan"
+    - "sweden"
+    - "stockholm"
+    - "netherlands"
+    - "amsterdam"
+    - "switzerland"
+    - "zurich"
+    - "zürich"
+    - "luxembourg"
+    - "hungary"
+    - "budapest"
+    - "romania"
+    - "bucharest"
+    - "lithuania"
+    - "vilnius"
+    - "slovenia"
+    - "ljubljana"
+    - "india"
+    - "bangalore"
+    - "bengaluru"
+    - "delhi"
+    - "gurugram"
+    - "hyderabad"
+    - "china"
+    - "beijing"
+    - "japan"
+    - "tokyo"
+    - "korea"
+    - "seoul"
+    - "singapore"
+    - "taiwan"
+    - "taipei"
+    - "hong kong"
+    - "thailand"
+    - "bangkok"
+    - "israel"
+    - "tel aviv"
+    - "qatar"
+    - "doha"
+    - "uae"
+    - "dubai"
+    - "abu dhabi"
+    - "saudi arabia"
+    - "riyadh"
+    - "mexico"
+    - "brazil"
+    - "são paulo"
+    - "sao paulo"
+    - "argentina"
+    - "uruguay"
+    - "buenos aires"
+    - "australia"
+    - "sydney"
+    - "melbourne"
+    - "canada"
+    - "toronto"
+    - "montreal"
+    - "ottawa"
+    - "vancouver"
+    - "calgary"
+    - "ontario"
+    - "europe"
+    - "middle east"
+    - "apac"
+    - "greater china"
+    - "southern europe"
 
 # Hard exclude, applied across ALL profiles, not per-profile like
 # exclusion_keywords above: a JD requiring US citizenship or a security

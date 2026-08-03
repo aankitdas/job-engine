@@ -232,3 +232,38 @@ than doing nothing. That question (does this company actually sponsor) is
 deferred to a separate, later task using DOL LCA disclosure data at the
 company-selection/registry layer, not per-job JD text, tracked as
 TODO.md's B1-followup. Confirmed by asking.
+
+**D23 addendum 3: seniority and US-location are both hard excludes across
+all profiles, added after a visual sample check, not planned upfront.**
+`is_above_target_seniority(title)` excludes any title containing
+"manager"/"director"/"head of"/"vp"/"vice president"/"chief"
+(word-boundary), no override list: unlike "forward deployed" needing
+"software" as an escape hatch, no title shape exists where a management/
+executive title should still count as an IC target role. Caught a Pinterest
+"Manager II, Machine Learning Engineering" posting slipping through in a
+random 30-title sample the user asked for specifically to eyeball fit, not
+from a spec requirement; the same sample also caught "AI Success Engineer"
+(customer-facing, not core software) and "User Researcher, AI Evaluations"
+(UX research, not ML), both fixed via `exclusion_keywords` on their
+respective profiles rather than a new mechanism.
+
+`is_us_location(job)` is a hard remote-OR-US requirement, not an exclusion
+list like the others: `is_remote(job)` passes regardless of location text
+(remote-anywhere vs. remote-US-only isn't distinguishable from the ATS
+data available, a known limitation, not solved here); otherwise
+`location_raw` must match a US signal (state abbreviation only when
+comma-prefixed, to avoid "OR"/"IN" colliding with English conjunctions;
+full state names; a handful of bare major-city names found by actually
+checking what a first pass left in the "ambiguous" bucket rather than
+assuming the state-code rules were enough, since "San Francisco" alone,
+with no state suffix, turned out to be 148 real jobs). Delaware ("DE") is
+deliberately excluded from the state-code list: it collides with
+Germany's ISO country code, which appears for real in this data ("Berlin,
+DE"); no genuine Delaware posting exists in the dataset today (checked
+directly), so this costs zero real recall now. A `location_raw` value that
+matches neither a US nor a recognized non-US signal (garbage like "N/A",
+"LOCATION", "AMER") is excluded but distinguishable via
+`classify_location()`'s `"ambiguous_unparseable"` return value, logged
+rather than silently defaulted either direction. All of this confirmed by
+asking, iteratively, as each gap surfaced from real data rather than
+designed in one pass upfront.
