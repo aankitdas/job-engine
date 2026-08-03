@@ -1,0 +1,99 @@
+# B3 deterministic filter + profile-routing config. See specs/04-sources.md
+# ("Open item") and D23 in docs/decisions.md: the daily_cap value below is a
+# deliberate non-target placeholder, not a tuned number. Title aliases are
+# grounded against real title/location/department distributions pulled from
+# data/jobengine.db (15 companies, 3834 jobs) during B3 planning, not the
+# spec's original placeholder list alone.
+
+profiles:
+  ai_ml_engineer:
+    title_aliases:
+      - "ai engineer"
+      - "ml engineer"
+      - "llm engineer"
+      - "machine learning engineer"
+      - "applied scientist"
+      - "researcher"          # bare form: real hits are mostly frontier-lab
+                               # research titles (Anthropic/OpenAI alignment,
+                               # interpretability, pretraining safety), see
+                               # docs/decisions.md D23 addendum for the
+                               # false-positive tradeoff (some UX/product
+                               # researcher titles also match)
+  software_engineer:
+    title_aliases:
+      - "software engineer"
+      - "backend engineer"
+      - "platform engineer"
+      - "engineer"            # bare form: broad by design, paired with
+                               # exclusion_keywords below to cut the
+                               # mis-routing it introduces on its own
+    # Applied only after a title already matched one of the aliases above.
+    # A title containing any of these is treated as NOT matching this
+    # profile, UNLESS it also contains one of exclusion_override_keywords
+    # (e.g. "Forward Deployed Software Engineer" should still match even
+    # though it contains "forward deployed").
+    exclusion_keywords:
+      - "security"
+      - "hardware"
+      - "data center"
+      - "it support"
+      - "network engineer"
+      - "systems administrator"
+      - "field engineer"
+      - "forward deployed"
+    exclusion_override_keywords:
+      - "software"
+  data_scientist:
+    title_aliases:
+      - "data scientist"
+      - "analytics engineer"
+      - "ml analyst"
+      - "scientist"           # bare form: real hits are mostly research
+                               # scientist variants, some non-ML noise
+                               # (e.g. "People Research Scientist, Recruiting")
+
+location:
+  remote_synonyms:
+    - "remote"
+
+# Hard exclude, applied across ALL profiles, not per-profile like
+# exclusion_keywords above: a JD requiring US citizenship or a security
+# clearance is a hard eligibility mismatch (see identity.toml's F-1 OPT
+# work authorization) regardless of which profile the title would otherwise
+# route to. Deliberately narrow: this only fires on explicit
+# citizenship/clearance/export-control language, never on the absence of
+# sponsorship language. See TODO.md's B1-followup and D23 in
+# docs/decisions.md for why a general visa-sponsorship detector is out of
+# scope here (most JDs never mention sponsorship either way; DOL LCA data
+# at the company-selection layer is the right tool for that question, not
+# per-job text matching).
+citizenship_clearance:
+  exclude_phrases:
+    - "must be a us citizen"
+    - "security clearance"
+    - "ability to obtain a security clearance"
+    - "itar"
+    - "export control"
+    - "us person"
+
+employment_type:
+  # Ashby's raw_json has a structured `employmentType` field (real values seen
+  # in data/jobengine.db: "FullTime"). Greenhouse has no such field at all, so
+  # its jobs fall back to the title-text heuristic below.
+  exclude_ashby_types:
+    - "Intern"
+    - "Contract"
+    - "Temporary"
+    - "PartTime"
+  exclude_title_keywords:
+    - "intern"
+    - "internship"
+    - "co-op"
+    - "contract"
+    - "temporary"
+    - "part-time"
+    - "part time"
+
+# Deferred, not tuned: see specs/04-sources.md "Open item" and D23 in
+# docs/decisions.md. null means no cap is applied yet.
+daily_cap: null

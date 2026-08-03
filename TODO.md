@@ -57,9 +57,31 @@ Snapshot history cannot be backfilled.
   real two-days-apart production check is still needed once scheduled, see
   PROGRESS.md.)
 
+- [ ] **B1-followup. Sponsorship-aware company vetting via DOL LCA data**
+  Deliberately not a JD-text filter: most postings never mention
+  sponsorship either way, so requiring positive language would silently
+  exclude real sponsoring companies that just don't say so in the JD (see
+  B3's `is_citizenship_or_clearance_required`, which only excludes on
+  explicit citizenship/clearance requirements, the opposite signal).
+  Public DOL LCA disclosure data (dol.gov, free, quarterly, real H-1B/PERM
+  filing history per employer) is the right source for "does this company
+  actually sponsor" and belongs at the company-selection/registry layer,
+  not per-job filtering. Not scoped or planned yet, just flagged so it
+  doesn't get lost.
+
 - [ ] **B3. Deterministic filters + profile routing**
-  Done: a full fetch reduces to 300-500 candidates/day and you agree with the
-  survivors on inspection.
+  Done: filter logic (title-to-profile, location/remote, employment type,
+  dedup vs `applications`) is grounded in real title/location/department
+  distributions and you agree with the survivors on inspection. The
+  300-500/day number itself is explicitly NOT this item's target; see the
+  open item below.
+
+- [ ] **B3-followup. Calibrate the daily filter-survivor cap**
+  Deferred out of B3 on purpose (see D23 in docs/decisions.md): today's db
+  is a 15-company, single-`first_seen_at` backlog snapshot, not real daily
+  inflow, so no cap tuned against it would mean anything. Revisit once (a)
+  5-7 real days of `runs`/sync history exist and (b) the company registry
+  has grown meaningfully past 15.
 
 ## Phase C: Local intelligence
 

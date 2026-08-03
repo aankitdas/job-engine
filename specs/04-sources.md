@@ -117,3 +117,11 @@ the GUI for the same reason.
 Two sync runs a day apart produce a non-zero count of rows with
 `first_seen_at` on the second day. `tests/test_sync.py` asserts that a second
 sync of unchanged data does not modify any `first_seen_at`.
+
+## Open item: filter-survivor target not yet calibrated
+docs/architecture.md's stage 2 (300-500 survivors/day) is a placeholder, not
+a number derived from real usage. As of B3 planning, the real db held one
+backlog snapshot (3,834 jobs, single `first_seen_at`, 15 companies), which
+cannot answer "how many new postings survive filters per day" (see D23 in
+docs/decisions.md). Revisit once there are 5-7 real days of sync history and
+the company registry is meaningfully past 15.

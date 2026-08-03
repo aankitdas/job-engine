@@ -175,3 +175,60 @@ first and getting explicit confirmation in that message, no exceptions for
 copy or a temp path instead (see hard rule 13 in CLAUDE.md). This reverses
 the working assumption every prior session operated under; do not fall
 back to the old "reset it, it's just fetched data" habit out of momentum.
+
+**D23. The 300-500/day filter-survivor target (docs/architecture.md stage 2,
+TODO.md's B3 line) is deferred, not calibrated against the current
+database.**
+At B3 planning time the real `jobs` table held 3,834 rows across only 15
+companies, all sharing a single `first_seen_at` (2026-08-02), because B2 has
+only ever run as one backlog fetch, never as a real day-over-day diff. That
+data answers "what fraction of the current stock matches a given title/
+location rule" but not "how many new postings survive filters per day": the
+former is a snapshot of accumulated backlog across 15 companies, the latter
+depends on daily inflow across the eventual 150-300-company seed list (spec
+04), a population this data cannot speak to. Picking a concrete daily cap
+or tuning filter strictness to hit 300-500 against today's numbers would be
+fitting a threshold to the wrong distribution. B3's filters (title-to-profile
+routing, location/remote rules, employment type, dedup against
+`applications`) are grounded in today's real title/location/department
+distributions instead, with thresholds in config, and the survivor cap left
+as a generous, non-binding default. Revisit the 300-500 number itself once
+(a) at least 5-7 real days of `runs`/`jobs.first_seen_at` history exist, and
+(b) the company registry has grown meaningfully past 15. Tracked as an open
+TODO.md item, not silently picked. Confirmed by asking (user flagged this
+directly rather than letting a session infer a number from the backlog).
+
+**D23 addendum: B3 persists nothing, `filter.py` exposes a pure
+`matches_profiles(job)` function.**
+The schema has no dedicated "filter survivor" table; `job_analysis` exists
+but its other columns (`canonical_title`, `required_keywords`, `tech_stack`,
+etc.) belong to C3/D1, not B3. Considered writing bare `(job_id, profile)`
+rows into `job_analysis` now, but rejected: `config/filters.yaml`'s alias
+lists are actively being tuned against real data as gaps surface (the bare
+"Engineer"/"Scientist"/"Researcher" additions this same session moved the
+naive match rate from 17.5% to 31.5%), and a persisted snapshot would go
+silently stale the moment the config changes again, with nothing to signal
+that a `job_analysis` row reflects an old config version. At the current
+data volume (3,834 rows) recomputing live costs nothing, so there is no
+performance reason to persist either. `filter.py`'s `matches_profiles(job)
+-> list[str]` is called live by whichever downstream stage needs it (C3,
+C4, the dashboard), not batched into a table. Confirmed by asking; revisit
+only if volume grows enough that live recomputation becomes measurably
+slow, not preemptively.
+
+**D23 addendum 2: citizenship/clearance is a hard exclude across all
+profiles, and B3 does NOT attempt general visa-sponsorship detection.**
+`is_citizenship_or_clearance_required(description)` checks JD text for
+explicit citizenship/clearance/export-control language ("must be a US
+citizen", "security clearance", "ITAR", "export control", "US Person") and
+excludes the job outright, independent of `matches_profiles`'s per-profile
+routing: a clearance requirement is a hard eligibility mismatch against
+`identity.toml`'s F-1 OPT authorization regardless of which profile the
+title would otherwise match. Deliberately not paired with a positive
+sponsorship-language filter: most JDs never mention sponsorship either
+way, so requiring positive language ("we sponsor visas") would silently
+exclude real sponsoring companies that simply don't say so, which is worse
+than doing nothing. That question (does this company actually sponsor) is
+deferred to a separate, later task using DOL LCA disclosure data at the
+company-selection/registry layer, not per-job JD text, tracked as
+TODO.md's B1-followup. Confirmed by asking.

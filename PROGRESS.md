@@ -4,14 +4,22 @@
 the end via `/checkpoint`. Do not rely on memory of previous sessions.**
 
 Last updated: 2026-08-02
-Current task: B3 (filters + routing, specs/04-sources.md's downstream) or
-A4b (PDF conversion, specs/03-renderer.md "PDF" section), not started;
-either is unblocked, ask which to do next. Windows Task Scheduler task
-`job-engine-sync` is built and wired to `scripts/sync.sh` (every 3h from
-6am local); what's still open is the unattended-overnight proof that it
-fires on its own, not a human running `schtasks /run`. See Known Issues,
-including a live signal from this checkpoint's own read-only db check that
-needs watching, not yet confirmed either way.
+Current task: B3 (filters + routing) is implemented and fully tested, but
+**not yet marked `done`**: TODO.md's own definition of done for B3 requires
+"you agree with the survivors on inspection," and that explicit sign-off
+has not happened yet this session, only the numbers have been shown and
+reconciled. Get that agreement first (see the final reconciled table in
+this session's log entry below), then pick the next task between
+B3-followup (daily-cap calibration, deliberately deferred, see D23),
+A4b (PDF conversion), or C1 (LLM router).
+
+Separately, unrelated to B3: Windows Task Scheduler task `job-engine-sync`
+is built and wired to `scripts/sync.sh` (every 3h from 6am local); the
+unattended-overnight proof that it fires on its own (not a human running
+`schtasks /run`) is still open. Re-checked read-only this session as a
+side effect of B3's db queries: `runs` is still 8 rows, same as the last
+checkpoint, so there is no new signal either way yet. See Known Issues for
+the exact check to run once real elapsed time has passed.
 
 **Read this before touching `data/jobengine.db`:** hard rule 13 in
 CLAUDE.md (added 2026-08-02, see D22 in docs/decisions.md) requires asking
@@ -35,7 +43,9 @@ project's own B1/B2 sessions) treated that file.
 | A4c | Watermarking (speculative preview) | not started | no urgency, no speculative bullets exist yet |
 | B1 | ATS clients + registry | done | clients+registry only, sync.py's fetch/diff loop is B2 |
 | B2 | Fetch and diff | done | `scripts/sync.sh` exists; not yet on cron/Task Scheduler, real two-days-apart check still pending, see Known Issues |
-| B3 | Filters + routing | not started | |
+| B1-followup | Sponsorship-aware company vetting (DOL LCA) | not started | flagged only, not scoped, see TODO.md |
+| B3 | Filters + routing | in progress | `filter.py` implemented, 23/23 tests pass, numbers reconciled; blocked only on your explicit sign-off on the survivor list per TODO.md's own DoD wording |
+| B3-followup | Calibrate daily filter-survivor cap | not started | deliberately deferred, see D23 in docs/decisions.md |
 | C1 | LLM router | not started | |
 | C2 | Eval fixtures | not started | human task |
 | C3 | Keyword extraction | not started | |
@@ -299,15 +309,68 @@ Status values: `not started` | `in progress` | `blocked` | `done`
   arguments, every 3h from 6am local); see Known Issues for what's still
   unverified about that.
 - **`data/jobengine.db` currently holds real accumulated state: 15
-  companies, 3834 jobs, 8 `runs` rows** (verified read-only via a plain
-  `SELECT COUNT(*)`/`SELECT * FROM runs`, not modified as part of this
-  checkpoint, per the hard rule below). This is not something to reset
-  "back to clean" in a future session without asking first, it may now
-  represent real `first_seen_at` history rather than disposable fetched
-  data. See the header note above and D22 in docs/decisions.md. Row count
-  grew from 6 to 8 `runs` between the last checkpoint and this one (ids 7
-  and 8, `started_at` 22:40:20 and 22:59:58 UTC on 2026-08-02); see Known
-  Issues for why that's not yet being read as proof of unattended firing.
+  companies, 3834 jobs, 8 `runs` rows, 0 `applications`** (re-verified
+  read-only this checkpoint via plain `SELECT COUNT(*)` on all four
+  tables; unchanged from the last checkpoint, so no new activity happened
+  between the two). Not modified this session, per the hard rule below.
+  Row count grew from 6 to 8 `runs` between two checkpoints ago and the
+  last one (ids 7 and 8, `started_at` 22:40:20 and 22:59:58 UTC on
+  2026-08-02); see Known Issues for why that's not yet being read as proof
+  of unattended firing.
+- `config/filters.yaml`: new, B3's filter/routing config. Per-profile
+  `title_aliases` (grounded against real title distributions pulled from
+  the live db, not just docs/architecture.md's placeholder table: e.g.
+  bare "engineer"/"scientist"/"researcher" added on top of the spec's
+  original phrase-only aliases), `software_engineer`'s
+  `exclusion_keywords`/`exclusion_override_keywords` (fixes the
+  mis-routing bare "engineer" introduces, e.g. "Security Engineer" and
+  "Forward Deployed Engineer" excluded unless "software" is also in the
+  title), `location.remote_synonyms`, `citizenship_clearance.exclude_phrases`
+  (hard exclude across all profiles, not per-profile), and
+  `employment_type` (Ashby's structured `raw_json.employmentType` field
+  plus a Greenhouse title-text fallback, since Greenhouse has no
+  structured employment-type field at all). `daily_cap: null`, a
+  deliberate non-target placeholder, not a tuned number; see D23 in
+  docs/decisions.md and its two addenda.
+- `src/jobengine/pipeline/filter.py`: new (first file in `pipeline/`, which
+  also got an empty `__init__.py` to match the `db`/`resume`/`sources`
+  convention). `load_filter_config()`, `matches_profiles(job, config) ->
+  list[str]`, `is_remote()`, `is_excluded_employment_type()`,
+  `is_already_applied(conn, job_id)`, `is_citizenship_or_clearance_required
+  (description, config)`. All pure functions, nothing persisted: no
+  filter-survivor table exists or is written to (`job_analysis`'s other
+  columns belong to C3/D1); downstream stages call these live. One shared
+  `_phrase_matches()` helper used by every check (word-boundary match for
+  single-word phrases so "engineer" doesn't match inside "engineering",
+  plain substring for multi-word phrases), so there is exactly one
+  "does this phrase appear" implementation, not five slightly different
+  ones.
+- `tests/test_filter.py`: new, 23 tests, written and confirmed all-red on
+  `ModuleNotFoundError` before implementation per hard rule 7, then all
+  23 passed on the first real implementation attempt (2 fixture-only
+  failures along the way were a missing `companies` seed row for the FK
+  chain, not a `filter.py` bug, fixed in the test fixture). Covers
+  `matches_profiles` (zero/one/multiple profile matches, case-
+  insensitivity, the exclusion/override interaction), `is_remote` (column
+  value wins even over conflicting location text, falls back to location
+  text when the column is null, false when neither signal exists),
+  `is_excluded_employment_type` (Greenhouse title heuristic, Ashby
+  structured field checked even against a clean title), `is_already_applied`
+  (real FK chain through `base_resumes`/`job_resume_variants`/
+  `applications`, plus the empty-table case, which is the real state
+  today), and `is_citizenship_or_clearance_required` (a Raytheon-style
+  clearance requirement excluded, a normal JD not excluded, and an EEOC
+  "sponsorship of employee resource groups" boilerplate line confirmed as
+  NOT a false positive).
+- **Final reconciled match-rate numbers against the real 3834 jobs**
+  (`ai_ml_engineer`/`software_engineer`/`data_scientist`): post-alias-match
+  86/973/91 (1071 total, 27.9%); post-employment-exclusion-only
+  86/968/90 (1065); post-citizenship-exclusion-only 85/957/91 (1055);
+  final survivors (both exclusions) **85/952/90 (1049 total, 27.4%)**.
+  Verified self-consistent via inclusion-exclusion: `|A| - |A∩E| - |A∩C| +
+  |A∩E∩C| = 1071 - 6 - 16 + 0 = 1049`, matching the direct set computation.
+  This is a snapshot of what fraction of the current 15-company backlog
+  matches the filter logic, explicitly not a daily-volume figure (see D23).
 
 ---
 
@@ -441,16 +504,32 @@ Status values: `not started` | `in progress` | `blocked` | `done`
   every `runs` row known at the time (ids 1-6, all
   2026-08-02T22:03-22:27 UTC) was a manual `schtasks /run` during
   setup/debugging, not a real trigger firing.
-  **Update from this checkpoint's own read-only db check:** two more
-  `runs` rows have appeared since (id 7 at 22:40:20 UTC, id 8 at
-  22:59:58 UTC), both `companies_ok=15 updated=3834 new=0 edited=0`, same
-  healthy zero-drift shape as id 6. Not treating this as evidence of
-  unattended firing yet: the gaps between ids 6-7-8 are ~13 and ~20
-  minutes, nowhere near the configured 3-hour interval, so these still
-  read as continued manual testing/debugging rather than the schedule
-  actually kicking in on its own. Genuine unattended firings should land
-  roughly 3 hours apart with nobody at the keyboard; that pattern hasn't
-  shown up in the `runs` table yet.
+  **Update, resolved rather than left as an anomaly:** two more `runs`
+  rows appeared after id 6 (id 7 at `2026-08-02T22:40:20Z`, id 8 at
+  `2026-08-02T22:59:58Z`, both `companies_ok=15 updated=3834 new=0
+  edited=0`, same healthy zero-drift shape). Checked both against the live
+  system, not left as an unexplained gap: this machine is Central Time,
+  CDT (UTC-5) active. Converted to local, id 7 is `17:40:20` (5:40:20 PM),
+  which lands nowhere near a trigger boundary, 20 minutes before the next
+  one (6pm), so **id 7 is a manual `schtasks /run`**, consistent with ids
+  1-6. Id 8 is `17:59:58` (5:59:58 PM), which is within **3 seconds** of
+  `schtasks /query /tn job-engine-sync /v`'s own reported `Last Run Time:
+  8/2/2026 6:00:01 PM`, on the exact configured 6-hour-of-day trigger
+  boundary (6am start, every 3h: 6/9/12/15/18/21). **id 8 is very likely
+  the first genuine unattended scheduled firing**, not a manual test: a
+  human-typed `schtasks /run` landing within 3 seconds of an exact
+  3-hour-grid boundary would be an extraordinary coincidence. Not treated
+  as fully conclusive, only strong: this machine's Task Scheduler
+  Operational event log (`Microsoft-Windows-TaskScheduler/Operational`,
+  checked via `Get-WinEvent -ListLog`) is disabled, so there's no
+  per-event log entry that definitively tags a run's trigger type the way
+  an enabled operational log would; the conclusion rests on timing
+  alignment, not a direct record. `schtasks /query` also reports `Next Run
+  Time: 8/2/2026 9:00:00 PM`, so a second same-evening data point is
+  available by re-checking `runs` after that time, ideally without anyone
+  running `schtasks /run` near it, to get a cleaner sample than id 8's
+  (which landed shortly after active manual testing, id 7, rather than
+  from a period of total inactivity).
   **Check to run tomorrow:** query `runs` (not `jobs`) grouped by
   `date(started_at)` and hour, `SELECT strftime('%Y-%m-%d %H', started_at)
   AS hour, counts FROM runs WHERE stage = 'sync' ORDER BY started_at` and
@@ -475,6 +554,33 @@ Status values: `not started` | `in progress` | `blocked` | `done`
   trigger an `edited` count or log line. Read as the spec's intended
   scope, not an oversight; revisit only if a real title-change case turns
   out to matter downstream.
+- `config/filters.yaml`'s `exclusion_keywords`/`exclusion_override_keywords`
+  only exist for `software_engineer`. `ai_ml_engineer`'s bare "researcher"
+  and `data_scientist`'s bare "scientist" aliases have no exclusion list
+  yet, even though the real-data check during B3 planning showed both pull
+  in some non-target noise (e.g. "People Research Scientist, Recruiting"
+  under `data_scientist`). Not fixed because the false-positive rate was
+  visibly much smaller than bare "engineer"'s (a handful of titles, not
+  hundreds) and no one asked for it; revisit if real usage shows it
+  matters more than this first read suggested.
+- `filter.py` has no location/country hard filter. `is_remote()` is only a
+  resolver (column vs. location-text fallback) used by tests and available
+  to callers; nothing in B3 actually excludes a job for being onsite in a
+  non-US location. `identity.toml`'s F-1 OPT US-only work authorization
+  makes this a real gap for a future pass, not implemented this session
+  because it was never asked for, only `is_citizenship_or_clearance_required`
+  (JD text) and the employment-type/dedup checks were.
+- B3's filter functions are exercised end to end against the real
+  3834-job db only via the one-off scratch scripts run during this
+  session (deleted after use, not checked in); there is no CLI entry
+  point yet (`uv run python -m jobengine.pipeline.filter ...`) the way
+  `registry`/`sync`/`bank`/`slop_lint` each have one. Nothing in TODO.md's
+  B3 DoD requires a CLI, so this wasn't built, but downstream stages (C3,
+  C4) will need *some* callable surface; revisit when one of them actually
+  needs to invoke this from outside a Python import.
+- TODO.md's B1-followup (DOL LCA-based sponsorship vetting) is flagged
+  only, no design work done: not scoped, no data source integration
+  started, just a placeholder so the idea isn't lost.
 
 ---
 
@@ -629,6 +735,40 @@ Status values: `not started` | `in progress` | `blocked` | `done`
   `db/__main__.py`, `sources/registry.py`, and `sources/sync.py`). The
   actual cause of that particular report was this session's own prior
   live-check resets, not a bug.
+- B3's daily-survivor-count target (docs/architecture.md's 300-500/day) is
+  deliberately not calibrated against the current db (15 companies, one
+  backlog snapshot, single `first_seen_at`). Recorded as D23 in
+  docs/decisions.md, significant enough for its own entry since it reverses
+  what would otherwise have been the natural approach (fit thresholds to
+  hit the number in the spec). Confirmed by asking; the user caught this
+  before any thresholds were picked.
+- B3 persists nothing: `filter.py` exposes pure functions, not a
+  filter-survivor table. Recorded as an addendum to D23 rather than its own
+  decision, since it's a direct consequence of the same "don't calibrate
+  against stale/small data" reasoning: a persisted snapshot would go stale
+  the moment `config/filters.yaml` is tuned again. Confirmed by asking.
+- `is_citizenship_or_clearance_required` is a hard exclude across all
+  profiles, and B3 deliberately does not attempt general visa-sponsorship
+  detection from JD text. Recorded as a second addendum to D23: the
+  asymmetry matters (absence of clearance language is neutral, absence of
+  sponsorship language is not evidence of anything, since most JDs never
+  mention it either way), so a positive-sponsorship-language filter would
+  silently punish real sponsoring companies. That question is deferred to
+  DOL LCA data at the company-selection layer (TODO.md's new B1-followup
+  item), not solved in B3. Confirmed by asking.
+- `_phrase_matches()` in `filter.py` applies word-boundary matching to any
+  single-word phrase and plain substring matching to any multi-word
+  phrase, as a general rule rather than a hardcoded list of "these specific
+  words need word boundaries." Not asked separately: this generalizes the
+  exact reasoning already confirmed for bare "engineer" (must not match
+  inside "engineering") to every other phrase in the config, including
+  ones added later, without needing a second hardcoded list kept in sync
+  with the YAML.
+- `src/jobengine/pipeline/__init__.py` was added as an empty file when
+  `filter.py` became the first file in that package, matching the existing
+  `db`/`resume`/`sources` convention (each has an empty `__init__.py`)
+  rather than leaving `pipeline/` as a bare namespace package like `rubric/`
+  currently is. Not asked separately, a direct convention match.
 
 ---
 
@@ -636,6 +776,56 @@ Status values: `not started` | `in progress` | `blocked` | `done`
 
 (Newest first. Date, task id, what changed, what to do next.)
 
+- 2026-08-02, B3 (implemented, not yet marked done): Built
+  `src/jobengine/pipeline/filter.py` (`matches_profiles`, `is_remote`,
+  `is_excluded_employment_type`, `is_already_applied`,
+  `is_citizenship_or_clearance_required`) and `config/filters.yaml`, per
+  TODO.md's B3 item. Before writing any code, pulled real distributions
+  from the live 3834-job/15-company db (title word frequency, exact-title
+  frequency, location/remote split, department breakdown) and simulated
+  naive filters against them rather than trusting docs/architecture.md's
+  placeholder alias lists; the user then explicitly stopped a hardcoded
+  daily-volume target from being derived from that same data (backlog
+  snapshot, not daily inflow, see new D23 in docs/decisions.md). Iterated
+  the title-alias config through several real-data-driven rounds: adding
+  the spec's original phrase-only aliases (17.5% naive match), then bare
+  "engineer"/"scientist"/"researcher" (31.5%, but with real mis-routing:
+  Security Engineer, IT Support Engineer, Forward Deployed Engineer all
+  matched `software_engineer`), then `exclusion_keywords` +
+  `exclusion_override_keywords` to fix the mis-routing without losing the
+  recall gain (27.9% naive, "Forward Deployed Software Engineer" still
+  matches via the "software" override). Wrote `tests/test_filter.py` (23
+  tests) before implementation per hard rule 7, confirmed all-red on
+  `ModuleNotFoundError` (verified via `--collect-only`, and confirmed the
+  failure was specifically the missing module and not a real bug: the
+  `pipeline` namespace package imports fine, `ast.parse` finds no syntax
+  errors in the test file). Implementation passed 21/23 on the first
+  attempt; the other 2 were a test-fixture bug (missing `companies` seed
+  row for `jobs.company_slug`'s FK), not a `filter.py` bug, fixed in the
+  fixture. Caught and corrected a real self-inconsistency in my own
+  reporting: an intermediate summary presented employment/citizenship
+  exclusion counts (27, 57) computed against the full 3834-job dataset
+  right next to a table about the 1071-job alias-matched subset, which
+  does not arithmetically reconcile; the user caught this and asked for
+  the derivation shown, not asserted. Recomputed with explicit
+  inclusion-exclusion set arithmetic (`|A| - |A∩E| - |A∩C| + |A∩E∩C| =
+  1071 - 6 - 16 + 0 = 1049`), confirmed it matches the direct set
+  computation. **Final numbers** (ai_ml_engineer/software_engineer/
+  data_scientist): 85/952/90, 1049/3834 total (27.4%). `uv run pytest`
+  121/121 passing (98 pre-existing + 23 new); `ruff check`/`format --check`
+  clean on `src/` (the pre-existing 3 `RUF059` findings and 2 unformatted
+  files remain `tests/test_render.py`/`tests/test_slop_lint.py` debt from
+  before this session, untouched, not in scope). Also added TODO.md's new
+  B1-followup item (DOL LCA sponsorship-aware company vetting, deliberately
+  out of scope for B3 itself: JD text alone can't distinguish "doesn't
+  sponsor" from "just didn't mention it") and specs/04-sources.md's "Open
+  item" note on the deferred daily-cap calibration.
+  **Not done yet, on purpose:** TODO.md's B3 definition of done requires
+  "you agree with the survivors on inspection," and that explicit
+  agreement has not been given this session, only the numbers have been
+  shown and reconciled. Status table marks B3 `in progress`, not `done`,
+  until that happens. Next: get sign-off on the B3 numbers, then pick
+  between B3-followup, A4b, or C1.
 - 2026-08-02, infra/safety (checkpoint verification, no code changes):
   Re-verified full state: `uv run pytest` 98/98 passing, `ruff
   check`/`format --check` clean on everything touched this project's B1/B2
