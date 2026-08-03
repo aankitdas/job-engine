@@ -267,3 +267,64 @@ matches neither a US nor a recognized non-US signal (garbage like "N/A",
 rather than silently defaulted either direction. All of this confirmed by
 asking, iteratively, as each gap surfaced from real data rather than
 designed in one pass upfront.
+
+**D22/D23 addendum: explicit hard-rule-13 exception granted for a scoped
+`description`/`content_hash` backfill on all 2,691 Greenhouse rows.**
+D22 and hard rule 13 in CLAUDE.md require asking first, with explicit
+confirmation in that message, before any destructive or state-resetting
+write to the real `data/jobengine.db`. This was exactly that: asked
+first, confirmed explicitly, and scoped tightly before touching anything.
+
+Root cause: `greenhouse.py`'s `_strip_html` had an ordering bug (tags
+stripped before entities were unescaped) that left every Greenhouse job's
+stored `description` containing raw HTML markup instead of plain text,
+discovered while building C2's eval fixture excerpts, not something this
+session went looking for. Fixed with an `html.parser`-based extractor (see
+the code comment above `_strip_html` in `greenhouse.py` for the full
+design and its one known limitation). Two new tests
+(`test_greenhouse_strips_double_escaped_real_markup`,
+`test_greenhouse_plain_text_content_passes_through_unchanged`) added
+alongside the existing literal-escaped-text test, which still passes
+unchanged.
+
+The backfill itself: `UPDATE jobs SET description = ?, content_hash = ?
+WHERE id = ?` for all 2,691 Greenhouse rows, `content_hash` recomputed
+from the newly-cleaned `description` via the same `sha256` convention
+`sync.py`'s `_content_hash` already uses, so the next sync's edit
+detection compares against the corrected baseline instead of flooding
+every Greenhouse job as "edited" on its next fetch. New values were
+computed from `raw_json`'s original `content` field, not from the
+already-polluted stored `description`, to avoid compounding whatever
+damage the old bug had already done. A 3-4 sample before/after diff
+(short, long, and one with nested `<h4>`/`<ul>`/`<li>` list structure) was
+shown and confirmed correct before the full run.
+
+Why this qualifies for the exception D22 anticipates: `first_seen_at`,
+`last_seen_at`, `closed_at`, and `raw_json` were not in the `UPDATE`'s
+column list at all, so none of the elapsed-time history D22 exists to
+protect was ever at risk by construction, not just by care. Verified
+after running, not just assumed: full before/after snapshot of every
+column on all 3,846 rows (not a sample) confirmed exactly 2,691 rows
+changed, all with `ats='greenhouse'`, zero `ats='ashby'` rows touched at
+all, and zero columns other than `description`/`content_hash` changed on
+any row. A local backup copy of the pre-backfill db was also kept in the
+scratchpad directory as an extra safety net, separate from the real path.
+
+**D24. C2's eval fixture attaches `required_keywords` to the
+max-relevance profile(s) only, not to every profile a job matches.**
+`tests/fixtures/eval/human_labels.yaml` asks the human labeller for one
+flat `required_keywords` list per job, but `human_labels` is keyed
+`(job_id, profile)`, same as `job_analysis` and `keyword_corpus`
+elsewhere in this schema: keywords are a per-profile concept everywhere
+else they appear. Rather than duplicate the same keyword list onto every
+profile row for a job regardless of fit, or force the labeller into
+per-profile keyword lists (more labelling burden for no clear benefit,
+since a JD's required keywords don't change based on which profile is
+asking), `load_human_labels()` computes each job's highest relevance
+score across the three profiles and attaches keywords only to whichever
+profile(s) tie for that maximum. A keyword list only makes sense in the
+context of the profile the JD actually matches; attaching it to a
+near-zero-relevance profile row would be meaningless. Confirmed by
+verifying real data supports this: on the 11 real keyword-annotated jobs,
+max relevance ranges 50-100 (mean 83.3), vs. 0-30 (mean 3.4) on the 39
+without, so the correlation this design assumes actually holds.

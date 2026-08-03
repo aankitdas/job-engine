@@ -66,6 +66,48 @@ def test_greenhouse_strips_html_entities_and_tags():
     assert postings[0].description_plain == "Build & ship <fast> Own it"
 
 
+def test_greenhouse_strips_double_escaped_real_markup():
+    # The real bug: some Greenhouse boards double-escape their own markup
+    # (confirmed against 100% of the 2691 real Greenhouse jobs in
+    # data/jobengine.db at the time this was found), so `content` has no
+    # literal "<"/">" anywhere, only entity sequences representing real
+    # tags one level down. These must be revealed and stripped, not left
+    # as literal "<h2>...</h2>" garbage in the plain-text output.
+    job = {
+        "id": 2,
+        "title": "T",
+        "updated_at": None,
+        "location": {"name": "NYC"},
+        "absolute_url": "https://boards.greenhouse.io/acme/jobs/2",
+        "content": "&lt;h2&gt;About Us&lt;/h2&gt; &lt;p&gt;We do things.&lt;/p&gt;",
+        "departments": [],
+        "offices": [],
+    }
+    transport = httpx.MockTransport(lambda request: _gh_response([job]))
+
+    postings = _run(greenhouse.fetch_board("acme", transport=transport))
+
+    assert postings[0].description_plain == "About Us We do things."
+
+
+def test_greenhouse_plain_text_content_passes_through_unchanged():
+    job = {
+        "id": 3,
+        "title": "T",
+        "updated_at": None,
+        "location": {"name": "NYC"},
+        "absolute_url": "https://boards.greenhouse.io/acme/jobs/3",
+        "content": "Just some plain text, no markup at all.",
+        "departments": [],
+        "offices": [],
+    }
+    transport = httpx.MockTransport(lambda request: _gh_response([job]))
+
+    postings = _run(greenhouse.fetch_board("acme", transport=transport))
+
+    assert postings[0].description_plain == "Just some plain text, no markup at all."
+
+
 def test_greenhouse_retries_on_5xx_then_succeeds():
     calls = {"n": 0}
 

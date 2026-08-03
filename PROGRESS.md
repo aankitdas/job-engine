@@ -4,13 +4,24 @@
 the end via `/checkpoint`. Do not rely on memory of previous sessions.**
 
 Last updated: 2026-08-03
-Current task: B3 (filters + routing) is **done**, signed off after two
-rounds of real-data-grounded fixes triggered by random visual sampling
-(not just passing tests): mis-routed titles, above-target-seniority
-titles, and a 205-job hole in the US-location allowlist, all caught by
-checking actual output against real data rather than trusting the design.
-Next: your call between B3-followup (daily-cap calibration, still
-deliberately deferred, see D23), A4b (PDF conversion), or C1 (LLM router).
+Current task: C2 (eval fixture set) is **done**. All 50 JDs in
+`tests/fixtures/eval/human_labels.yaml` labelled by the user with
+non-null relevance scores across all three profiles (verified directly,
+zero nulls, zero malformed values remaining after fixing a batch of
+"90S"/"0S"/"70S" string-typo values found during the completeness check),
+loaded into the real `human_labels` table (150 rows, 50 jobs x 3
+profiles, confirmed idempotent on re-run). 11 of the 50 have
+hand-extracted `required_keywords`, short of TODO.md's literal "15"
+target; marked done anyway per explicit user sign-off, flagged honestly
+here rather than silently rounded up (see Known Issues). Along the way,
+this session also found and fixed a real, previously-undetected bug: every
+Greenhouse-sourced job's stored `description` contained raw HTML markup,
+not plain text (see D22/D23 addendum in docs/decisions.md), fixed in
+`greenhouse.py` and backfilled across all 2,691 affected rows with
+before/after verification.
+Next: your call between C1 (LLM router), C3 (keyword extraction, now
+unblocked with real human_labels to calibrate against), B3-followup, or
+A4b.
 
 Separately: B2's unattended-overnight proof is now **resolved**. Windows
 Task Scheduler task `job-engine-sync` fired on its own twice on 2026-08-03
@@ -50,8 +61,8 @@ project's own B1/B2 sessions) treated that file.
 | B3 | Filters + routing | done | signed off 2026-08-03; `filter.py` implemented, 40/40 tests pass, final numbers 859/3836 survivors (68/776/81 per profile) |
 | B3-followup | Calibrate daily filter-survivor cap | not started | deliberately deferred, see D23 in docs/decisions.md |
 | C1 | LLM router | not started | |
-| C2 | Eval fixtures | not started | human task |
-| C3 | Keyword extraction | not started | |
+| C2 | Eval fixtures | done | 50/50 JDs labelled, loaded into `human_labels` (150 rows); 11/15 keyword-annotated, short of TODO.md's literal target, done anyway per explicit sign-off, see Known Issues |
+| C3 | Keyword extraction | not started | unblocked now that real human_labels exist to calibrate against |
 | C4 | Relevance filter | not started | |
 | D1 | Rubric rules | not started | |
 | D2 | PDF geometry | not started | |
@@ -395,6 +406,76 @@ Status values: `not started` | `in progress` | `blocked` | `done`
   exclusion-keyword profile mismatch described above. This remains a
   snapshot of what fraction of the current ~15-company stock matches the
   filter logic, not a daily-volume figure (D23 still applies).
+- `src/jobengine/sources/greenhouse.py`'s `_strip_html`: rewritten from a
+  regex tag-strip to an `html.parser`-based extractor, fixing a real bug
+  found while building C2's fixture excerpts (not something this session
+  went looking for): every Greenhouse job's `content` field is double-HTML-
+  escaped in practice (`&lt;h2&gt;...&lt;/h2&gt;`, no literal tag anywhere),
+  and the old code's tag-strip-then-unescape order left that markup
+  completely unstripped in `jobs.description`. The new `_strip_html` feeds
+  the raw string to an `HTMLParser` subclass that tracks whether it saw a
+  genuine tag; if it did (matches the older, purely synthetic "real tag
+  plus a separately-escaped literal-text mention" test case), it trusts
+  that pass; if it didn't (matches 100% of real Greenhouse data, verified
+  directly across all 2,691 jobs), it unescapes once and re-parses,
+  correctly revealing and stripping the real markup. No new dependency.
+  See the code comment above `_strip_html` for the one known limitation
+  (the found-tag heuristic assumes a field is never a genuine mix of both
+  patterns; true for 100% of real data checked, not a logical guarantee)
+  and D22/D23's addendum in docs/decisions.md for the full writeup. 2 new
+  tests added (double-escaped real markup, plain-text passthrough); the
+  original synthetic test still passes unchanged.
+- **All 2,691 existing Greenhouse rows in `data/jobengine.db` were
+  backfilled** with the corrected `description` (recomputed from
+  `raw_json`'s original `content`, not from the already-polluted stored
+  value) and a matching recomputed `content_hash`. Explicit hard-rule-13
+  exception granted and recorded (D22/D23 addendum): scoped to exactly
+  those two columns, `first_seen_at`/`last_seen_at`/`closed_at`/`raw_json`
+  never in the `UPDATE`'s column list. Verified after running via a full
+  before/after snapshot of every column on all 3,846 rows that existed at
+  the time, not a sample: exactly 2,691 changed, all `ats='greenhouse'`,
+  zero `ats='ashby'` rows touched, zero columns other than the two
+  intended ones changed anywhere.
+- `src/jobengine/eval/` (new package, `fixtures.py` only so far;
+  `harness.py`/`tasks/`/`report.py` from spec 07's module layout are not
+  built, that's C1/C3/C4's work, not C2's): `load_human_labels(conn, path)
+  -> int`, a pure loader with no scorer/extractor/comparison logic.
+  `required_keywords` is one flat list per job in the YAML but
+  `human_labels` is keyed `(job_id, profile)` like the rest of this schema
+  (`job_analysis`, `keyword_corpus`), so the loader attaches the keyword
+  list only to whichever profile(s) have that job's highest relevance
+  score, not to every profile a job merely scored above zero on. Upserts
+  on the `(job_id, profile)` primary key, so re-running as the fixture
+  gets filled in over multiple sittings updates in place rather than
+  erroring or duplicating; verified directly, not just by test, running
+  the loader twice against the real filled-in file left `human_labels` at
+  150 rows both times.
+- `tests/fixtures/eval/human_labels.yaml`: the real C2 fixture, 50 real
+  JDs. Regenerated once mid-session to swap `description_excerpt` (an
+  800-char truncation) for the full JD text under a plain `description`
+  field, matched and merged by `job_id` so the 7 labels already filled in
+  at that point survived the regeneration (verified programmatically, not
+  eyeballed). **Now fully labelled**: all 50 have non-null relevance
+  scores for all three profiles, 11 of the 50 have hand-extracted
+  `required_keywords` (short of the spec's "~15" target, see Known
+  Issues), loaded into the real `human_labels` table, 150 rows. A
+  completeness check caught 3 real data-entry typos ("90S"/"0S"/"70S",
+  string not int, all on `ai_ml_engineer`, all three consecutive job_ids)
+  before they could reach the loader; fixed by hand after the user
+  confirmed the intended values.
+- `tests/test_eval_fixtures.py`: 6 tests, written before implementation
+  per hard rule 7's spirit, all passed on the first real implementation
+  attempt (one test-fixture FK issue along the way, the same
+  `companies`/`jobs`-seeding gap `test_filter.py` hit earlier, fixed in
+  the fixture not the loader). Covers: a filled profile writes correctly,
+  an all-null job is skipped entirely (never written as a junk row), null
+  `required_keywords` doesn't break anything, keywords attach only to the
+  max-relevance profile, a re-run with revised scores updates in place
+  rather than duplicating, and a mixed batch only counts labelled
+  profiles. Deliberately uses small hand-written YAML fixtures, not the
+  real 50-job file, so these test the loader's logic directly rather than
+  depending on how much of the real file happens to be labelled at any
+  given time.
 
 ---
 
@@ -616,6 +697,28 @@ Status values: `not started` | `in progress` | `blocked` | `done`
 - TODO.md's B1-followup (DOL LCA-based sponsorship vetting) is flagged
   only, no design work done: not scoped, no data source integration
   started, just a placeholder so the idea isn't lost.
+- **C2's `required_keywords` coverage is 11/50, not the ~15 TODO.md and
+  spec 07 both call for.** Marked done anyway per explicit user sign-off,
+  not silently rounded up or hidden: where it does exist, coverage is
+  correctly correlated with real target-profile matches (max relevance
+  50-100 on keyword-annotated jobs, 0-30 on the rest, verified directly),
+  so the shortfall is in count, not correctness. Revisit only if C3's
+  keyword-extraction eval (Task 2, spec 07) turns out to need a larger
+  labelled set to produce a stable precision/recall number; not assumed
+  necessary preemptively.
+- `src/jobengine/eval/` has only `fixtures.py` (the C2 loader). Spec 07's
+  module layout also calls for `harness.py`, `tasks/`, and `report.py`;
+  none of those exist yet, that's C1/C3/C4's work building the actual
+  model-eval harness, not C2's scope (a labelled fixture file plus a way
+  to load it).
+- `greenhouse.py`'s new `_strip_html` found-tag heuristic (see the code
+  comment directly above the function) assumes a Greenhouse `content`
+  field is never a genuine mix of literal tags and separately-escaped
+  literal text in the same string. Confirmed true for all 2,691 real rows
+  checked this session, not a guarantee about future API responses. If
+  descriptions ever look wrong again after a Greenhouse API change, that
+  assumption is the first thing to check, per the code comment's own
+  explicit note.
 
 ---
 
@@ -804,6 +907,23 @@ Status values: `not started` | `in progress` | `blocked` | `done`
   `db`/`resume`/`sources` convention (each has an empty `__init__.py`)
   rather than leaving `pipeline/` as a bare namespace package like `rubric/`
   currently is. Not asked separately, a direct convention match.
+- `greenhouse.py`'s `_strip_html` bug (tag-strip-then-unescape left every
+  Greenhouse job's real, double-escaped markup completely unstripped) was
+  found by accident, while building C2's fixture excerpts, not something
+  this session set out to look for. Fixed with an `html.parser`-based
+  extractor plus a found-tag heuristic to reconcile it with an older,
+  purely synthetic test case that needed the opposite order; empirically
+  verified both before proposing the design and after implementing it,
+  including a full sweep confirming 0/2,691 real Greenhouse jobs still
+  contain any tag residue post-fix, not just a sample. Backfilled the
+  existing 2,691 rows under an explicit, scoped hard-rule-13 exception.
+  See D22/D23's addendum in docs/decisions.md.
+- C2's `human_labels.keywords` is attached only to a job's max-relevance
+  profile(s), not duplicated across every profile the job has any row for.
+  See D24 in docs/decisions.md for the full reasoning; significant enough
+  (a real schema-shape mismatch between the fixture's one-list-per-job
+  design and the table's per-profile keying) to warrant its own decision
+  number, not folded into an existing one.
 
 ---
 
@@ -811,6 +931,54 @@ Status values: `not started` | `in progress` | `blocked` | `done`
 
 (Newest first. Date, task id, what changed, what to do next.)
 
+- 2026-08-03, C2 (done) + unplanned greenhouse.py bug fix and backfill:
+  Built C2's scaffolding (`tests/fixtures/eval/human_labels.yaml` seeded
+  from 50 real JDs, `src/jobengine/eval/fixtures.py`'s `load_human_labels`,
+  `tests/test_eval_fixtures.py`, 6 tests written before implementation, all
+  passed on the first real attempt). While building the fixture's
+  description excerpts, discovered every Greenhouse-sourced job's stored
+  `description` contained raw, unstripped HTML markup: Greenhouse's real
+  `content` field double-escapes its own markup, and the existing
+  `_strip_html`'s tag-strip-then-unescape order (a deliberate B1 fix for a
+  different, purely synthetic edge case) left the revealed tags completely
+  unstripped once unescaped. Stopped and surfaced this before proceeding,
+  rather than working around it locally; user directed a real fix.
+  Verified empirically, before proposing anything, that a naive single-pass
+  fix could not satisfy both the old synthetic test and the newly-found
+  real case simultaneously, then designed and confirmed a found-tag
+  heuristic that does (100% of 2,691 real Greenhouse jobs are
+  double-escaped with zero mixed cases, which is what makes the heuristic
+  safe). Fixed in `greenhouse.py` with an `html.parser`-based extractor, no
+  new dependency; 2 new tests added, the original synthetic test unchanged
+  and still passing. Backfilled all 2,691 affected rows
+  (`description`/`content_hash` only) under an explicit, narrowly-scoped
+  hard-rule-13 exception: showed a 3-4 sample before/after diff first,
+  including one with nested `<h4>`/`<ul>`/`<li>` structure, got explicit
+  go-ahead, then ran the full backfill and verified via a full before/
+  after snapshot of every column on all 3,846 rows (not a sample) that
+  exactly 2,691 changed, all Greenhouse, zero Ashby rows touched, zero
+  columns other than the two intended ones changed anywhere. Recorded as
+  a D22/D23 addendum in docs/decisions.md.
+  Regenerated the fixture file once with full JD text instead of an
+  800-char excerpt (renamed `description_excerpt` -> `description`),
+  matched and merged by `job_id` so the 7 labels already filled in at that
+  point survived, verified programmatically. Ran a completeness/sanity
+  check at the user's request (all-non-null check, required_keywords
+  correlation with relevance, per-profile distribution, flat-score
+  flagging) that caught 3 real data-entry typos (`"90S"`/`"0S"`/`"70S"`,
+  string not int) before they could reach the loader; fixed by hand after
+  confirming intended values with the user. Final state: all 50 JDs fully
+  labelled (zero nulls, zero malformed values), loaded into the real
+  `human_labels` table (150 rows, verified idempotent on re-run), 11 of 50
+  have `required_keywords` (short of TODO.md's literal "~15", marked done
+  anyway per explicit sign-off, flagged in Known Issues rather than
+  silently rounded up). D24 added to docs/decisions.md for the
+  keyword-to-max-relevance-profile mapping design.
+  `uv run pytest` 146/146 passing; `ruff check`/`format --check` clean on
+  `src/` (same pre-existing `tests/test_render.py`/`tests/test_slop_lint.py`
+  debt, untouched, not in scope). TODO.md C2 checked off. Next: your call
+  between C1 (LLM router), C3 (keyword extraction, now unblocked with real
+  human_labels to calibrate against), B3-followup, or A4b.
 - 2026-08-03, B3 (done) + B2 (unattended-firing proof resolved): Took the
   previous session's implemented-but-unsigned-off B3 through two rounds of
   real-data-grounded fixes, both triggered by random visual sampling the

@@ -95,9 +95,13 @@ Snapshot history cannot be backfilled.
   Done: `llm.check` reports reachable local, and exits non-zero if any
   Anthropic provider would be constructed under default config.
 
-- [ ] **C2. Eval fixture set** (`specs/07-model-eval.md`)
+- [x] **C2. Eval fixture set** (`specs/07-model-eval.md`)
   Done: 50 JDs labelled by you, 15 with hand-extracted keywords, in
   `human_labels`. This is your hour, not Claude Code's.
+  (Closed 2026-08-03: 50/50 labelled, loaded, 150 rows in `human_labels`,
+  verified idempotent. 11/50 have hand-extracted keywords, short of the
+  literal "15" above; marked done anyway per explicit sign-off, see
+  PROGRESS.md Known Issues, not silently rounded up.)
 
 - [ ] **C3. Keyword extraction + corpus**
   Done: eval Task 2 passes (recall >= 0.85, precision >= 0.70).
