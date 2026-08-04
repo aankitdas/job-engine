@@ -362,3 +362,204 @@ zero `"api"` stages, so it wasn't treated as a separate ambiguity worth
 interrupting for. Revisit only when a real stage is deliberately added
 that needs a paid call, which per hard rule 9 requires stopping and asking
 first, not a design this module should silently grow toward.
+
+**D26. C3's Task 2 eval scores against required_keywords UNION
+preferred_keywords, not required_keywords alone; the required/preferred
+split stays in `ExtractionSchema` for the pipeline's own use but is not a
+scoring boundary in the eval.** Originally scored required_keywords only,
+matching spec 07's literal wording ("precision and recall against your
+hand-extracted lists") and the fixture's single `required_keywords`
+field. Live-run investigation of a genuine failure (qwen3.5:9b scored
+precision 0.358 / recall 0.279 against the 11 real labeled jobs, both far
+under the 0.70/0.85 gates) surfaced the concrete case that forced this
+change: `job_id` 2246 (Stripe, Staff SWE API Platform)'s own JD text
+splits into "Minimum requirements" and "Preferred qualifications"
+sections, and the original hand label put `on-call`/`incident
+response`/`serverless` in `required_keywords` even though the JD's own
+structure places them under Preferred. The model correctly extracted
+them, just filed them under `preferred_keywords`, and a required-only
+comparison scored that as three false negatives. Different real JDs
+structure their qualifications sections inconsistently (two tiers, three
+tiers, no explicit split at all), so a strict required-vs-preferred
+scoring boundary was measuring section-header inconsistency across
+postings, not extraction quality. `tech_stack` stays excluded from the
+predicted set: it is scoped to "every tool named anywhere in the
+posting" (broader than any qualifications section), so including it
+would inflate false positives against a label that was never meant to
+cover background-prose mentions.
+
+Re-reviewing the 11 labeled jobs under the simpler rule (union of
+required- and preferred-style qualification content, exhaustively listed,
+still excluding a JD's genuine bonus/"Nice to have" tier where one exists
+separately from its main preferred section) surfaced two more real,
+pre-existing data-quality bugs in `tests/fixtures/eval/human_labels.yaml`,
+independent of the required/preferred issue and predating this session:
+`job_id` 1705 (DoorDash robotics infrastructure) had invented
+profile-category terms (`data scientist`, `engineering manager`,
+`machine learning`) that appear nowhere in that JD's actual text, and
+`job_id` 2545 (Anthropic, Research Engineer/Knowledge Team, an
+information-retrieval/RAG role) had a generic Anthropic-safety-flavored
+keyword list (`RLHF`, `RLAIF`, `constitutional AI`, `AI ethics`, ...)
+copy-pasted in, none of which appear in that specific posting either.
+Both fixed the same way as the 4-job duplicate-list bug caught earlier
+this session (see the D22/D23 addendum above): by reading each real JD
+directly and re-deriving the list from its actual text, not guessed.
+Confirmed by asking before re-scoring: the user explicitly requested
+Claude re-extract these by hand rather than doing it themselves. `job_id`
+2246 was left unchanged (its content was already correct, only the
+scoring boundary was wrong).
+
+**D26 addendum 1: `_EXTRACTION_PROMPT`'s "Correct" examples now include a
+non-technology skill/practice term, not named tools only.** Isolated
+testing (a synthetic JD snippet, not the real fixture, tested first per
+explicit request) found the model was dropping legitimate required
+skills like `technical consulting` and `solutions architecture` outright,
+while extracting `distributed systems`/`API design` from an identically-
+shaped "N+ years of X, Y, Z" sentence right next to it. This ruled out
+the original hypothesis (years-of-experience instruction swallowing the
+whole clause) and pointed at a narrower one instead: the model was
+implicitly narrowing "keyword" to mean "named tool," dropping or
+misfiling role/discipline terms that aren't a specific technology.
+Fixed by adding `"technical consulting"`, `"solutions architecture"`,
+`"incident response"`, `"financial risk modeling"` alongside
+`"Python"`/`"Kubernetes"`/`"AWS"` in the prompt's own "Correct" list,
+plus an explicit line distinguishing "non-technical" (a valid keyword)
+from "generic/personal trait" (not one, e.g. "communication skills").
+Confirmed on the same synthetic snippet before touching the real
+fixture, then spot-checked against two real jobs: `job_id` 3267 improved
+on both precision and recall (TP 1->3, FN 5->3); `job_id` 2246 improved
+on precision only, its other 6 missing keywords (`api design`,
+`abstractions`, `frameworks`, `client libraries`, `infrastructure`,
+`on-call`) are a different, still-open gap this fix does not touch.
+**Net pooled effect across all 11 jobs was a real trade, not a clean
+win**: recall rose substantially (0.534 -> 0.681, TP 62->79, FN 54->37)
+but precision fell (0.530 -> 0.380, FP 55->129) by more than recall
+gained, because loosening "keyword = named tool only" made the model
+more liberal broadly, not only for the specific terms the fix targeted.
+Reported to the user as a mixed result, not overstated as a win; left
+as-is pending the user's direction on whether to tighten precision back
+up or accept the trade and move on.
+
+**D26 addendum 2: `tech_stack` exclusion from Task 2 scoring is final,
+not a per-job judgment call, and the reasoning is not symmetric with the
+required/preferred merge above.** required_keywords and
+preferred_keywords are the *same scope* (both qualification-framed for
+the role), just split inconsistently by the model, which is why merging
+them was safe. `tech_stack` is a *different scope* by its own schema
+definition ("every tool named anywhere in the posting," not
+"qualifications for this role"), so merging it in would conflate two
+genuinely different categories, not just paper over another unreliable
+split. Quantified before deciding, not asserted: `job_id` 3283's real
+`tech_stack` output has 27 items, of which exactly 2
+(`sensor drivers`, `video encode`) are legitimate misfiled required
+skills; the other 25 are implementation-detail nouns from the "what
+you'll do" bullets (`power sequencing`, `capture scripts`, `debugging
+utilities`, the company name, ...) that no reasonable hand label would
+ever call a required keyword. Of that job's 7 real misses, only those 2
+trace to tech_stack; the other 5 are genuine gaps. Including all of
+`tech_stack` would recover a small, bounded number of true positives per
+job at the cost of a much larger volume of real false positives, the
+opposite of the required/preferred merge's risk profile. Accepted as a
+known, bounded source of recall drag rather than fixed by widening the
+scoring: the model occasionally filing a genuinely-required skill under
+`tech_stack` instead of `required`/`preferred` is a prompt-clarity gap,
+same category as addendum 1 above, not a scoring-boundary problem.
+Revisit with a targeted prompt fix (not a scoring change) only if this
+turns out to matter at a scale beyond the 2-item case observed here.
+
+**D26 addendum 3: `_EXTRACTION_PROMPT` keeps the original, narrower
+named-tech-focused wording. The "non-tech skills count too" variant from
+addendum 1 was tried, measured against a clean ground truth, and
+reverted — this closes the prompt-iteration question with real evidence,
+not left open.** All of addendum 1's fixture issues (the 4-job duplicate-
+list bug, `job_id` 1705/2545's invented/copy-pasted terms, the
+required/preferred merge, and finally a fully exhaustive, per-job,
+source-quoted re-review of all 11 labeled jobs, human-reviewed) are now
+resolved; `tests/fixtures/eval/human_labels.yaml` is the cleanest ground
+truth this project has had. Both prompt variants were re-run against this
+same stable fixture, back to back, with nothing else changed, specifically
+to settle addendum 1's still-open question with an apples-to-apples
+comparison:
+
+| | Original prompt (named tech only) | "non-tech skills" variant |
+|---|---|---|
+| TP / FP / FN | 105 / 21 / 120 | 112 / 71 / 113 |
+| Precision | **0.833** (passes the >=0.70 gate) | 0.612 (fails) |
+| Recall | 0.467 | 0.498 |
+| schema_validity_rate | 1.000 | 1.000 |
+
+The variant's extra permissiveness barely moved recall (+7 TP out of 120
+misses, +0.031) while tripling false positives (21 -> 71), dropping
+precision out of a passing gate. This is a materially worse trade-off
+than addendum 1's own measurement against the pre-cleanup fixture (there,
+the same variant moved recall 0.534 -> 0.681 for a comparable precision
+cost) — evidence that the variant's apparent win earlier in the session
+was partly an artifact of a noisier, less exhaustive ground truth, not a
+stable property of the prompt itself. Reverted to the original wording,
+kept for its outright-better precision and comparable recall. Neither
+variant clears Task 2's bar (recall 0.467-0.498 against a 0.85 gate, on
+this now much larger and more exhaustive 225-term label set); the
+remaining gap is a real recall shortfall against genuinely exhaustive
+ground truth, not a scoring-boundary or fixture-quality artifact, and
+that reframes what "next" means for C3: further prompt micro-iteration on
+this same axis has demonstrably diminishing (here, negative) returns, so
+the next real lever is a different candidate model (spec 07's list:
+`granite4:8b`, `qwen3:8b`, `mistral:7b-v0.3`), not another prompt tweak.
+
+**D27. C3 ships with qwen3.5:9b's real measured extraction quality
+(precision 0.833, recall 0.467 against the fully-reviewed 11-job
+`human_labels.yaml` fixture), which does not meet spec 07's original
+Task 2 gates (recall >= 0.85, precision >= 0.70). This is a deliberate
+decision to stop iterating and ship, not a silent miss of the DoD.**
+Recall is the failing metric (0.467 vs. 0.85); precision passes outright
+(0.833 vs. 0.70) on the reverted, named-tech-focused prompt (see D26
+addendum 3 for the full model/prompt-iteration record this decision
+follows from — two prompt variants and three real fixture-quality bugs
+were tried and measured before concluding further iteration on this axis
+has diminishing returns).
+
+Three reasons, not one, support shipping rather than continuing to chase
+the numeric gate:
+
+(a) **Every resume this pipeline produces goes through human review
+before anything is sent** (`docs/architecture.md`'s pipeline, stage 8,
+"review, manual, Telegram + web," strictly before stage 9, "apply, by
+autonomy level"). Extraction errors are caught downstream by a human
+before they can cause harm, not silently acted on. This is structurally
+different from, say, a rubric bug that could silently mis-score a
+resume with no human in the loop before submission.
+
+(b) **Recall gaps are under-extraction, and under-extraction cannot
+produce invented content**, only a less-optimally-tailored resume (a
+real bank bullet that could have been surfaced for a match doesn't get
+selected/promoted). This is the safe failure direction given CLAUDE.md
+hard rule 2 ("Never invent resume content... Uncovered JD keywords go to
+the gap ledger, not into a new bullet") and the schema's own gap_ledger
+table, which exists specifically to log uncovered keywords rather than
+fabricate coverage for them. A false-positive-heavy failure mode
+(hallucinated keywords driving fabricated bullet content) would be a much
+harder call to ship on; recall-heavy failure is not that.
+
+(c) **An 11-job synthetic fixture, however carefully hand-reviewed, is
+still an approximation.** Real-world usage against live daily job
+postings, followed by real manual review of the resumes it produces, is
+the only way to find out whether qwen3.5:9b's actual extraction quality
+is a practical problem or not; a static fixture eval can bound the
+question but can't settle it.
+
+**Revisit only if manual review of real pipeline output reveals
+extraction quality as a recurring practical issue**, not preemptively.
+At that point the options, in the order they should be tried: (1) the
+next candidate model in spec 07's list (`granite4:8b`, then `qwen3:8b`,
+then `mistral:7b-v0.3`) against the same fixture and, more importantly,
+against real recurring failures observed in review; (2) a cheap paid API
+call specifically for the extraction stage only — flagged explicitly as
+breaking the zero-cost daily-loop design this whole project is built
+around (`docs/architecture.md`: "no paid API call in the daily loop";
+CLAUDE.md hard rule 9: "the daily pipeline is zero-cost by design... if
+you believe a stage needs a paid call, stop and ask"), so this option
+requires deliberately stopping and asking, never a default fallback;
+(3) accepting current quality as sufficient, which is already this
+decision's starting position and may simply get re-confirmed. Confirmed
+by asking; this is the user's call, not inferred from a general
+"good enough" heuristic.

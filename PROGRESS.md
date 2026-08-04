@@ -3,25 +3,34 @@
 **Claude Code: read this file at the start of every session and update it at
 the end via `/checkpoint`. Do not rely on memory of previous sessions.**
 
-Last updated: 2026-08-03
-Current task: C1 (LLM router + local Ollama provider) is **done**. New
-`src/jobengine/llm/` package (`schemas.py`, `providers/{local,anthropic}.py`,
-`router.py`, `check.py`) plus `config/llm.toml` implement spec 05's router:
-`think=False` is set explicitly on every local call, never left to a
-Modelfile default, and the Anthropic billing guard is two independent
-layers (an explicit `api_key` argument required at both
-`AnthropicProvider.__init__` and `router.get_provider()`,
-`config.llm.api.enabled` defaults false, no stage routes to `"api"`,
-neither module ever reads `os.environ` for a key), see D25 in
-docs/decisions.md. 21 new tests pass against a mocked `ollama` client, and
-`uv run python -m jobengine.llm.check` was then run live against the real
-WSL2/Windows Ollama setup by the user: all three stages reachable, exit
-code 0, cold-start latency 14,945ms on the first call after Ollama loads
-the model, steady-state 600-935ms across 3 consecutive clean runs after
-that (see Known Issues, flagged so a future session's first check of the
-day isn't mistaken for a regression).
-Next: your call between C3 (keyword extraction, now unblocked with both
-real human_labels and a real router), B3-followup, or A4b.
+Last updated: 2026-08-04
+Current task: C3 (keyword extraction + corpus) is **done, shipped against
+a deliberate quality decision, not against spec 07's literal numeric
+gate**. Real measured extraction quality (qwen3.5:9b, the reverted
+named-tech-focused prompt) against the fully human-reviewed 11-job
+`human_labels.yaml` fixture: **precision 0.833 (passes >= 0.70), recall
+0.467 (fails >= 0.85)**. The decision to ship anyway, not keep iterating,
+is recorded as D27 in docs/decisions.md: every resume goes through human
+review before it's sent (architecture.md stage 8, strictly before stage
+9 "apply"), recall gaps only under-extract (never invent content, the
+safe failure direction under hard rule 2), and an 11-job fixture can only
+approximate real usage. Revisit only if manual review of real pipeline
+output later shows this is a recurring practical problem, not
+preemptively; D27 lists the options in order (next candidate model, a
+deliberately-asked-about paid API call for this one stage, or accepting
+current quality) if that happens.
+Built this session: `src/jobengine/pipeline/extract.py` (the extraction
+call + job_analysis/keyword_corpus persistence, reusing C1's router
+directly per CLAUDE.md hard rule 8) and `src/jobengine/eval/{harness,
+report,tasks/keyword_extraction}.py` (spec 07's Task 2 harness, pooled
+TP/FP/FN, `uv run python -m jobengine.eval {run,compare}`). Also, along
+the way, found and fixed 3 real pre-existing data-quality bugs in the
+`human_labels.yaml` fixture from the original C2 session (see D26 in
+docs/decisions.md) and did a full exhaustive, source-quoted, human-
+reviewed re-derivation of all 11 labeled jobs' `required_keywords`, now
+the cleanest ground truth this project has had.
+Next: your call between C4 (relevance pre-filter, spec 06, the other
+half of spec 07's eval harness, Task 1), B3-followup, or A4b.
 
 Separately: B2's unattended-overnight proof is now **resolved**. Windows
 Task Scheduler task `job-engine-sync` fired on its own twice on 2026-08-03
@@ -62,7 +71,7 @@ project's own B1/B2 sessions) treated that file.
 | B3-followup | Calibrate daily filter-survivor cap | not started | deliberately deferred, see D23 in docs/decisions.md |
 | C1 | LLM router | done | `llm.check` verified live against real Ollama, all 3 stages reachable, exit 0; cold-start ~15s / steady-state 600-935ms, see Known Issues |
 | C2 | Eval fixtures | done | 50/50 JDs labelled, loaded into `human_labels` (150 rows); 11/15 keyword-annotated, short of TODO.md's literal target, done anyway per explicit sign-off, see Known Issues |
-| C3 | Keyword extraction | not started | unblocked now that real human_labels exist to calibrate against |
+| C3 | Keyword extraction | done | shipped per D27 (ship decision), not literal DoD: precision 0.833 passes, recall 0.467 fails the 0.85 gate, see Known Issues |
 | C4 | Relevance filter | not started | |
 | D1 | Rubric rules | not started | |
 | D2 | PDF geometry | not started | |
@@ -551,6 +560,103 @@ Status values: `not started` | `in progress` | `blocked` | `done`
   3 consecutive clean runs with no per-stage anomaly. See Known Issues for
   why the cold-start number is expected, not a regression signal.
 
+- `src/jobengine/pipeline/extract.py` (new, C3): `ExtractionSchema`
+  (`required_keywords`, `preferred_keywords`, `tech_stack`; deliberately
+  narrower than `job_analysis`'s 6 LLM-populated columns, see D26 in
+  docs/decisions.md, `canonical_title`/`seniority` left `NULL` pending a
+  later phase that can validate them), `is_good_quality_jd()` (Lee's
+  "has a Requirements/Qualifications section" rule, deterministic regex,
+  not an LLM judgment call), `extract_keywords()` (the only place this
+  module talks to an LLM, goes through `router.get_provider("extract",
+  ...)` directly, never constructs its own `ollama` client, confirmed by
+  a test that inspects the module's own source text), and `analyze_job()`
+  (the production orchestration function: one LLM call per job regardless
+  of matched-profile count, since `required_keywords` doesn't depend on
+  profile; fans out to one `job_analysis` row per profile the job matches
+  via B3's `matches_profiles()`, and feeds only `required_keywords`,
+  never `preferred_keywords`/`tech_stack`, into `keyword_corpus`). The
+  extraction prompt (`_EXTRACTION_PROMPT`) went through two real
+  iterations this session and was reverted back to the original,
+  narrower, named-technology-focused wording; see D26 addenda 1 and 3 for
+  the measured evidence both ways. `job_analysis` gained a new
+  `CREATE UNIQUE INDEX idx_job_analysis_job_profile ON job_analysis
+  (job_id, profile)` in `schema.sql` (additive, applied against the real
+  db while the table held zero rows) so `db/models.py`'s new
+  `upsert_job_analysis()` can `ON CONFLICT` correctly; a re-run of
+  extraction for a job replaces its prior analysis rather than
+  accumulating history, matching `relevance_scores`'/`human_labels`'
+  convention. Also new in `db/models.py`: `JobAnalysis`/`ModelEval`
+  pydantic models, `upsert_keyword_corpus_entry()` (increments
+  `occurrences`, `first_seen_at` fixed on insert, `last_seen_at` always
+  advances), `insert_model_eval()`.
+- `tests/test_extract.py` (13 tests, written before implementation per
+  hard rule 7): `think=False` on this call path too (inherited from C1
+  but independently tested, not just assumed); one LLM call per job
+  regardless of matched-profile count; a job matching zero profiles skips
+  the LLM call entirely, not just the persistence; `job_analysis` gets
+  one row per matched profile with identical `required_keywords`; a
+  re-run upserts rather than duplicates; `keyword_corpus` occurrence
+  counts accumulate correctly across two jobs sharing a keyword.
+- `src/jobengine/eval/tasks/keyword_extraction.py`, `report.py`,
+  `harness.py`, `__main__.py` (new, fleshing out spec 07's module layout,
+  previously only `fixtures.py` existed): Task 2 only (Task 1 is C4's
+  scope, not wired in yet, an explicit `# TODO C4` marker in
+  `harness.py`, not a silent gap). `keyword_extraction.run()` pools
+  TP/FP/FN across all labeled jobs (not per-job ratios averaged) and
+  calls `jobengine.pipeline.extract.extract_keywords()` directly, the
+  exact same call C3's production path uses, deliberately bypassing
+  `router.call()`'s fallback wrapper so one bad call doesn't abort the
+  other jobs in the eval loop. The predicted set for scoring is
+  `required_keywords` UNION `preferred_keywords` on both sides (not
+  required-only, and not including `tech_stack`); see D26 addenda 2 for
+  why these are two different, non-symmetric calls, both closed, not to
+  be re-litigated per job. `report.py`'s `fixture_version` is a sha256 of
+  the fixture YAML's own bytes, computed at run time, not a hand-
+  maintained version string. CLI: `uv run python -m jobengine.eval
+  {run --model <name>, compare}`.
+- `tests/test_eval_keyword_extraction.py` (11 tests): a hand-built
+  scenario with known TP/FP/FN counts asserting exact precision/recall
+  values, not just a threshold check; schema-failure resilience (one bad
+  job doesn't abort the other 14); the required/preferred union and the
+  tech_stack exclusion, each with a dedicated test; `fixture_version`
+  hashing; `model_evals` row shape.
+- **`tests/fixtures/eval/human_labels.yaml` is, as of this session, the
+  cleanest ground truth this project has had**, per explicit user
+  request to fully re-review it. All 11 keyword-labelled jobs (of 50
+  total; the fixture's still-11-not-15 shortfall is C2's original,
+  already-flagged gap, unchanged this session, see Known Issues) were
+  re-derived from scratch: exhaustively pulled from each JD's real
+  qualifications-style sections only (Requirements/Minimum requirements/
+  Preferred/Nice to Have/"you might thrive if"-type bullets, explicitly
+  excluding "what you'll do"/responsibilities text even where it names
+  real skills, a deliberate scope boundary, not an oversight, see Known
+  Issues for which jobs lost real-looking terms because of it), with an
+  inline YAML comment on every term group quoting the exact source
+  sentence, human-reviewed against a side-by-side old-vs-new summary
+  table before being finalized. Along the way this also caught and fixed
+  3 real pre-existing data-quality bugs from the original C2 labeling
+  session, independent of anything this session did: `job_id` 2732/2809/
+  3267/3283 originally shared one verbatim copy-pasted generic AI/ML
+  keyword list (including on a job with nothing to do with ML, "Camera
+  Software Engineer, Consumer Devices"), and `job_id` 1705/2545 each had
+  invented or copy-pasted terms that don't appear anywhere in their real
+  JD text. See D26 in docs/decisions.md for the full history.
+- **Real, live model_evals history from this session (21 rows, 7 runs, 3
+  metrics each), all `qwen3.5:9b-q4_K_M`/`keyword_extraction`**, tracking
+  every fixture/prompt fix in order: 0.079/0.079 (original prompt, buggy
+  fixture) -> 0.250/0.158 (atomic-terms prompt fix) -> 0.358/0.279 (fixed
+  the 4-job duplicate-list bug) -> 0.530/0.534 (merged required+preferred
+  scoring, fixed 2 more data bugs) -> 0.380/0.681 ("non-tech skills"
+  prompt variant, same fixture) -> **0.833/0.467 (original prompt,
+  against the fully-reviewed fixture, the row that matches the code as
+  shipped)** -> 0.612/0.498 ("non-tech skills" variant re-tested against
+  the clean fixture, tried and rejected, see D26 addendum 3). **The
+  `model_evals` table's most recent row by `run_at` is the rejected
+  0.612/0.498 variant, not the 0.833/0.467 shipped state**, since
+  `model_evals` is an append-only log with no column marking which row
+  matches the current code; flagged in Known Issues so a future
+  `compare` doesn't get read as "current" by recency alone.
+
 ---
 
 ## Known issues and deferred work
@@ -832,12 +938,64 @@ Status values: `not started` | `in progress` | `blocked` | `done`
   the envelope is C3/C4's job when those stages call `router.call()`, not
   C1's. Flagging so a future session doesn't go looking for where C1
   wrote its own accounting and conclude something's missing.
-- No downstream stage calls `jobengine.llm.router` yet; C1 is the router
-  and local provider only, per TODO.md's scope. C3 (keyword extraction)
-  is the first real caller and will be the first place `router.call()`'s
-  actual ergonomics (async, the `LLMCallResult` envelope shape, the
-  `local_client=`/`api_key=` injection points) get exercised by something
-  other than this session's own tests.
+- **Update, no longer current:** the line above originally said no
+  downstream stage called `jobengine.llm.router` yet. C3's
+  `extract_keywords()` (`pipeline/extract.py`) is now the first real
+  caller, going through `router.get_provider()` directly rather than
+  `router.call()`'s fallback wrapper (a deliberate choice, not an
+  oversight of C1's design, see `extract.py`'s own docstring and D26 in
+  docs/decisions.md for why the eval harness specifically needs per-job
+  failure isolation that `call()`'s "fail" fallback would prevent).
+- **C3 shipped against a deliberate quality decision (D27 in
+  docs/decisions.md), not spec 07's literal Task 2 gate.** Real measured
+  extraction quality, qwen3.5:9b, against the fully-reviewed 11-job
+  fixture: precision 0.833 (passes), recall 0.467 (fails the 0.85 gate
+  by a wide margin). Two prompt variants and three real fixture bugs were
+  tried and measured before concluding further prompt/model iteration on
+  this axis has diminishing (in one case, negative) returns; see D26
+  addenda 1 and 3 for the full evidence. Not blocking, per D27's explicit
+  reasoning (human review gates every send, recall gaps only
+  under-extract and can't invent content under hard rule 2, and an
+  11-job fixture can only approximate real usage), but a real, known
+  quality gap, not a hidden one. Revisit only if manual review of real
+  pipeline output later shows this recurring in practice, per D27's
+  listed options (next candidate model, a deliberately-asked-about paid
+  API call for this one stage, or accepting current quality).
+- **`model_evals`'s most recent row by `run_at` does not match the
+  extraction quality actually shipped.** The table is an append-only log
+  of every eval run (21 rows, 7 runs, this session), and the very last
+  run tried and rejected the "non-tech skills" prompt variant
+  (precision 0.612 / recall 0.498) before `extract.py` was reverted back
+  to the shipped state (precision 0.833 / recall 0.467, the second-to-
+  last run). Nothing in the schema marks which row corresponds to the
+  code currently in the repo. `uv run python -m jobengine.eval compare`
+  will show the rejected variant's numbers as the newest row; don't read
+  "most recent" as "current" without cross-checking `extract.py`'s actual
+  prompt text or re-running `eval run` fresh. A future session (or a
+  schema column, `is_current` or similar) could fix this properly; not
+  done here since it wasn't asked for and the workaround (re-run to get
+  a fresh, unambiguous number) is cheap.
+- **`job_analysis` and `keyword_corpus` have zero rows in the real db,
+  still.** Only `extract_keywords()` (the raw LLM call) has been
+  exercised live this session, via the eval harness; `analyze_job()` (the
+  actual production orchestration function that writes to `job_analysis`/
+  `keyword_corpus`) has only ever been run in tests against a `tmp_path`
+  db, never against `data/jobengine.db`. No daily-pipeline orchestrator
+  exists yet to call it for real (that's later phase wiring, D-phase and
+  beyond); flagging so a future session doesn't assume the corpus has
+  started accumulating just because C3 is marked done.
+- **The qualifications-section-only scope boundary used to re-derive
+  `human_labels.yaml` drops some real-looking terms that only appear in
+  a JD's "what you'll do"/responsibilities text.** Applied consistently
+  across all 11 jobs per explicit instruction, not inconsistently, but
+  worth knowing about: `job_id` 2545 lost `fine-tuning`/`reinforcement
+  learning`, `job_id` 3654 lost `robust evals`/`reward signals`/
+  `training data` (arguably its most central, role-defining terms),
+  `job_id` 1705 lost `CI/CD`/`cross-compilation`, `job_id` 3267 lost
+  `SDLC`, `job_id` 3283 lost `firmware`. If a future session wants
+  responsibilities-section content included too, that's a scope change
+  to make deliberately, not a bug to fix silently; the current fixture
+  is internally consistent under the boundary it was built with.
 
 ---
 
@@ -1079,6 +1237,32 @@ Status values: `not started` | `in progress` | `blocked` | `done`
   entry point. Not asked separately: a direct convention match, same
   reasoning already applied without asking to `pipeline/__init__.py` in
   the B3 session.
+- C3's extraction schema is narrower than `job_analysis`'s full 6-column
+  shape (keywords + `tech_stack` only; `jd_quality` computed
+  deterministically; `canonical_title`/`seniority` deferred), confirmed
+  by asking before coding. `job_analysis` also gained a
+  `(job_id, profile)` unique index so re-running extraction upserts
+  rather than accumulates history, matching `relevance_scores`, also
+  confirmed by asking. See D26 in docs/decisions.md.
+- Task 2's eval scoring compares `required_keywords` UNION
+  `preferred_keywords` on both sides, not required-only, and
+  deliberately excludes `tech_stack` even though it sometimes contains a
+  genuinely-missed required skill. Both calls are significant enough,
+  and evidence-grounded enough (concrete job_ids, real measured
+  precision/recall deltas, not just reasoning), to warrant their own
+  decision entries rather than folding into code comments alone: D26
+  addenda 1-3 in docs/decisions.md.
+- **C3 ships with real extraction quality that does not meet spec 07's
+  numeric Task 2 gate (recall 0.467 vs. 0.85), a deliberate decision, not
+  a silent shortfall.** Confirmed by explicit user instruction, with
+  reasoning spanning the pipeline's own architecture (human review before
+  every send), CLAUDE.md hard rule 2 (under-extraction can't invent
+  content, the safe failure direction), and the limits of a static
+  fixture eval versus real usage. Recorded as D27 in docs/decisions.md,
+  including the revisit conditions and the ordered list of options if
+  manual review later shows this matters in practice. TODO.md's C3
+  checkbox and the Status table above both reference D27 explicitly
+  rather than silently claiming the literal DoD passed.
 
 ---
 
@@ -1086,6 +1270,43 @@ Status values: `not started` | `in progress` | `blocked` | `done`
 
 (Newest first. Date, task id, what changed, what to do next.)
 
+- 2026-08-04, C3 (done, shipped against D27, not the literal gate): Built
+  `pipeline/extract.py` (extraction call via C1's router + job_analysis/
+  keyword_corpus persistence) and `eval/{harness,report,tasks/
+  keyword_extraction}.py` (spec 07 Task 2: pooled TP/FP/FN, `uv run
+  python -m jobengine.eval {run,compare}`), plus a `job_analysis`
+  `(job_id, profile)` unique index and matching `db/models.py`
+  accessors. 24 new tests (`test_extract.py` 13, `test_eval_keyword_
+  extraction.py` 11), all written before implementation per hard rule 7.
+  Then ran the real eval live against qwen3.5:9b, 7 times, iterating for
+  real: caught and fixed 3 real pre-existing data-quality bugs in the
+  original C2-session `human_labels.yaml` fixture (a 4-job duplicate
+  copy-pasted keyword list, 2 more jobs with invented/wrong-template
+  terms), tried and measured two prompt variants (one real bug fix,
+  sentence-fragment extraction; one genuine trade-off, "non-tech skills
+  count too," which looked like a win on a noisier fixture but was tried
+  and rejected once measured against a clean one), and finally did a
+  full exhaustive, source-quoted, human-reviewed re-derivation of all 11
+  labeled jobs' `required_keywords` at explicit user request. Every step
+  characterized with real isolated tests before being applied broadly
+  (a synthetic-JD test falsified one hypothesis about why a specific
+  real job was failing before the actual cause, non-technology terms
+  read as soft skills, was found and fixed) — same standard as B3's
+  inclusion-exclusion reconciliation, applied to model-quality debugging
+  instead of filter counts. Final real numbers: precision 0.833 (passes
+  the 0.70 gate), recall 0.467 (fails the 0.85 gate) against the fully-
+  reviewed fixture, on the reverted, better-precision prompt. **C3 marked
+  done anyway, per explicit user decision (D27 in docs/decisions.md):
+  human review gates every resume send, recall gaps only under-extract
+  and can't invent content under hard rule 2, and an 11-job fixture can
+  only approximate real usage; revisit if manual review of real output
+  later shows this recurring in practice, not preemptively.** `uv run
+  pytest` 191/191 passing; `ruff check`/`format --check` clean on
+  everything touched this session (same pre-existing `test_render.py`/
+  `test_slop_lint.py` debt, untouched). TODO.md C3 checked off,
+  referencing D27 explicitly rather than the literal numeric DoD. Next:
+  your call between C4 (relevance pre-filter, spec 06, Task 1 of the
+  same eval harness), B3-followup, or A4b.
 - 2026-08-03, C1 (done): The one thing left after the prior entry below,
   the live `uv run python -m jobengine.llm.check` run against a real
   Ollama server, is now done: the user ran it against the real WSL2/

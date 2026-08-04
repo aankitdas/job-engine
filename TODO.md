@@ -109,8 +109,17 @@ Snapshot history cannot be backfilled.
   literal "15" above; marked done anyway per explicit sign-off, see
   PROGRESS.md Known Issues, not silently rounded up.)
 
-- [ ] **C3. Keyword extraction + corpus**
+- [x] **C3. Keyword extraction + corpus**
   Done: eval Task 2 passes (recall >= 0.85, precision >= 0.70).
+  (Closed 2026-08-04: does NOT meet this literal gate. Real measured
+  quality against the fully-reviewed 11-job fixture is precision 0.833 /
+  recall 0.467 (qwen3.5:9b, reverted named-tech-focused prompt). Marked
+  done anyway per explicit user decision to ship rather than continue
+  model/prompt iteration; see D27 in docs/decisions.md for the full
+  reasoning (human review gates every send, under-extraction is a safe
+  failure direction under hard rule 2, an 11-job fixture can only
+  approximate real usage) and the revisit conditions if manual review
+  later shows this is a recurring practical problem.)
 
 - [ ] **C4. Relevance pre-filter** (`specs/06-relevance-filter.md`)
   Done: eval Task 1 passes (rho >= 0.70, top-30 overlap >= 0.75).

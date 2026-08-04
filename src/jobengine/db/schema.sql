@@ -213,6 +213,14 @@ CREATE INDEX IF NOT EXISTS idx_jobs_content_hash ON jobs (content_hash);
 CREATE INDEX IF NOT EXISTS idx_job_analysis_keyword_hash_profile ON job_analysis (keyword_hash, profile);
 CREATE INDEX IF NOT EXISTS idx_outcomes_application_occurred ON outcomes (application_id, occurred_at);
 
+-- C3: one analysis per (job, profile). Re-running extraction for a job
+-- upserts in place rather than accumulating history, matching
+-- relevance_scores' and human_labels' convention. Added after job_analysis
+-- already existed with zero rows, so this is additive (a unique index, not
+-- a table rebuild) and safe against the real db's accumulated jobs/companies
+-- data, which this statement never touches.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_job_analysis_job_profile ON job_analysis (job_id, profile);
+
 -- first_seen_at is computed by us and immutable once set (see specs/00-data-model.md
 -- and docs/decisions.md D3). Enforced here, not in Python, so no future caller --
 -- upsert, migration, or manual fix-up -- can silently clobber it. The jobs/companies

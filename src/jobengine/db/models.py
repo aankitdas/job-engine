@@ -60,6 +60,35 @@ class Run(BaseModel):
     errors: str | None = None
 
 
+class JobAnalysis(BaseModel):
+    id: int | None = None
+    job_id: int
+    profile: str
+    canonical_title: str | None = None
+    seniority: str | None = None
+    required_keywords: str | None = None
+    preferred_keywords: str | None = None
+    tech_stack: str | None = None
+    jd_quality: str | None = None
+    keyword_hash: str | None = None
+    analyzed_at: str
+    model: str
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    cost_usd: float
+
+
+class ModelEval(BaseModel):
+    id: int | None = None
+    model: str
+    task: str
+    metric: str
+    value: float
+    passed: bool
+    fixture_version: str | None = None
+    run_at: str
+
+
 def upsert_company(conn: sqlite3.Connection, company: Company) -> None:
     """Insert a company, or update it on (slug, ats) conflict.
 
@@ -211,5 +240,75 @@ def record_run(conn: sqlite3.Connection, run: Run) -> int:
         RETURNING id
         """,
         run.model_dump(exclude={"id"}),
+    )
+    return cursor.fetchone()[0]
+
+
+def upsert_job_analysis(conn: sqlite3.Connection, analysis: JobAnalysis) -> int:
+    """Insert a job's analysis, or replace it on (job_id, profile) conflict.
+
+    A re-run overwrites the prior analysis rather than accumulating
+    history, matching relevance_scores'/human_labels' convention
+    (idx_job_analysis_job_profile in schema.sql is the unique index this
+    relies on; job_analysis has no composite primary key).
+    """
+    cursor = conn.execute(
+        """
+        INSERT INTO job_analysis (
+            job_id, profile, canonical_title, seniority, required_keywords,
+            preferred_keywords, tech_stack, jd_quality, keyword_hash,
+            analyzed_at, model, input_tokens, output_tokens, cost_usd
+        ) VALUES (
+            :job_id, :profile, :canonical_title, :seniority, :required_keywords,
+            :preferred_keywords, :tech_stack, :jd_quality, :keyword_hash,
+            :analyzed_at, :model, :input_tokens, :output_tokens, :cost_usd
+        )
+        ON CONFLICT (job_id, profile) DO UPDATE SET
+            canonical_title = excluded.canonical_title,
+            seniority = excluded.seniority,
+            required_keywords = excluded.required_keywords,
+            preferred_keywords = excluded.preferred_keywords,
+            tech_stack = excluded.tech_stack,
+            jd_quality = excluded.jd_quality,
+            keyword_hash = excluded.keyword_hash,
+            analyzed_at = excluded.analyzed_at,
+            model = excluded.model,
+            input_tokens = excluded.input_tokens,
+            output_tokens = excluded.output_tokens,
+            cost_usd = excluded.cost_usd
+        RETURNING id
+        """,
+        analysis.model_dump(exclude={"id"}),
+    )
+    return cursor.fetchone()[0]
+
+
+def upsert_keyword_corpus_entry(
+    conn: sqlite3.Connection, profile: str, keyword: str, seen_at: str
+) -> None:
+    """Bump a keyword's occurrence count for a profile, or insert it at
+    occurrences=1 if new. first_seen_at is set once, on insert, and never
+    moves afterward; last_seen_at always advances to seen_at.
+    """
+    conn.execute(
+        """
+        INSERT INTO keyword_corpus (profile, keyword, occurrences, first_seen_at, last_seen_at)
+        VALUES (:profile, :keyword, 1, :seen_at, :seen_at)
+        ON CONFLICT (profile, keyword) DO UPDATE SET
+            occurrences = occurrences + 1,
+            last_seen_at = excluded.last_seen_at
+        """,
+        {"profile": profile, "keyword": keyword, "seen_at": seen_at},
+    )
+
+
+def insert_model_eval(conn: sqlite3.Connection, model_eval: ModelEval) -> int:
+    cursor = conn.execute(
+        """
+        INSERT INTO model_evals (model, task, metric, value, passed, fixture_version, run_at)
+        VALUES (:model, :task, :metric, :value, :passed, :fixture_version, :run_at)
+        RETURNING id
+        """,
+        model_eval.model_dump(exclude={"id"}),
     )
     return cursor.fetchone()[0]

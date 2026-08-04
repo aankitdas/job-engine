@@ -54,7 +54,11 @@ job_id, profile, canonical_title, seniority, required_keywords (JSON array),
 preferred_keywords (JSON), tech_stack (JSON), jd_quality (`good` | `bad`, per
 Lee: does it have a Requirements/Qualifications bullet section), keyword_hash
 (sha256 of sorted required_keywords, used for clustering), analyzed_at, model,
-input_tokens, output_tokens, cost_usd.
+input_tokens, output_tokens, cost_usd. Unique on (job_id, profile); a re-run
+upserts in place rather than accumulating history, matching
+`relevance_scores`/`human_labels`. `canonical_title` and `seniority` are not
+populated by C3 (no ground truth to grade them against yet); left `NULL`
+until a later phase actually consumes and can validate them.
 
 ### keyword_corpus
 profile, keyword, occurrences, first_seen_at, last_seen_at.

@@ -705,7 +705,19 @@
     ai_ml_engineer: 75
     software_engineer: 100
     data_scientist: 50
-  required_keywords: ["TypeScript", "Python", "Java", "RAG", "NoSQL", "API", "LLM", "AI"]
+  # TypeScript, Python, Java: "Strong proficiency in backend technologies (TypeScript, Python, or Java)"
+  # production systems: "building production systems"
+  # AI integration architecture, LLMs, intelligent automation, fine-tuning, prompt engineering, RAG: "hands-on experience with AI integration architecture, including using LLMs in intelligent automation, fine-tuning, prompt engineering, and RAG"
+  # microservices, integrations: "building microservices and integrations"
+  # messaging infrastructure, data streaming, storage solutions: "Good understanding of messaging infrastructure, data streaming, and storage solutions"
+  # relational databases, NoSQL databases, PL/SQL: "Experience with relational and NoSQL databases, including the ability to write, review, and suggest PL/SQL code optimization"
+  # distributed systems, API design, AWS: "Strong backend and distributed systems expertise, including API design and AWS"
+  # AI: "Track record of using AI in development"
+  # Oracle Cloud, ERP: "experience with Oracle Cloud products or other ERP systems"
+  # AI agents, MCP, Claude: "Experience building AI agents and MCPs, preferably using Claude"
+  # Docker, Kubernetes: "Experience with containerization and orchestration (Docker, Kubernetes)"
+  # open-source contributions: "Contributions to open-source, publications at top venues, or public speaking engagements"
+  required_keywords: ['TypeScript', 'Python', 'Java', 'production systems', 'AI integration architecture', 'LLMs', 'intelligent automation', 'fine-tuning', 'prompt engineering', 'RAG', 'microservices', 'integrations', 'messaging infrastructure', 'data streaming', 'storage solutions', 'relational databases', 'NoSQL databases', 'PL/SQL', 'distributed systems', 'API design', 'AWS', 'AI', 'Oracle Cloud', 'ERP', 'AI agents', 'MCP', 'Claude', 'Docker', 'Kubernetes', 'open-source contributions']
 - job_id: 799
   title: Compliance Manager, Marketing
   company: brex
@@ -2064,7 +2076,21 @@
     ai_ml_engineer: 75
     software_engineer: 90
     data_scientist: 65
-  required_keywords: ["ROS2", "robotics", "autonomy", "machine learning", "software engineering", "data science", "ai", "ml", "engineering manager", "software engineer", "data scientist"]
+  # ROS2, LCM, eCal, Apex.AI: "experience with robotics middleware (ROS2, LCM, eCal, Apex.AI)"
+  # CMake, Bazel, Nix, Conan: "experience with build systems and package managers (CMake, Bazel, Nix, Conan)"
+  # NVIDIA Jetson, JetPack: "experience with NVidia Jetson and JetPack"
+  # RViz, Foxglove, Rerun, Plotly: "experience with robotics logging and visualization (RViz, Foxglove, Rerun, Plotly)"
+  # C++, Python, systems-level debugging: "strong C++ and Python skills, and comfortable with systems-level debugging"
+  # LLVM, linker behavior, optimization passes: "build system and compiler internals (LLVM, linker behavior, optimization passes)"
+  # observability: "you treat observability as a first-class problem"
+  # robotics: "prior experience at a robotics company in a similar infrastructure role"
+  # fault-tolerant systems: "Experience designing fault-tolerant systems for safety-critical applications"
+  # open-source robotics tooling: "Contributions to open-source robotics tooling"
+  # deterministic replay, time-travel debugging: "Experience with deterministic replay or time-travel debugging for robotics"
+  # DO-178C: "Familiarity with DO-178C or similar certification-aware development processes"
+  # process supervision, systemd, supervisord: "informed opinions on process supervision (systemd vs custom vs supervisord)"
+  # DDS: "debugged DDS/middleware issues under real-time constraints on embedded hardware"
+  required_keywords: ['ROS2', 'LCM', 'eCal', 'Apex.AI', 'CMake', 'Bazel', 'Nix', 'Conan', 'NVIDIA Jetson', 'JetPack', 'RViz', 'Foxglove', 'Rerun', 'Plotly', 'C++', 'Python', 'systems-level debugging', 'LLVM', 'linker behavior', 'optimization passes', 'observability', 'robotics', 'fault-tolerant systems', 'open-source robotics tooling', 'deterministic replay', 'time-travel debugging', 'DO-178C', 'process supervision', 'systemd', 'supervisord', 'DDS']
 - job_id: 1852
   title: Creative Director, Brand Experiences
   company: stripe
@@ -2186,7 +2212,13 @@
     ai_ml_engineer: 10
     software_engineer: 50
     data_scientist: 80
-  required_keywords: ["credit risk", "financial risk modeling", "cash flow forecasting", "accounting principles", "financial statements", "business models", "credit risks", "SQL", "data visualization", "fast-paced", "high-growth", "entrepreneurs", "cfo", "ceo"]
+  # credit underwriting, financial risk modeling, cash flow forecasting: "knowledge of commercial credit underwriting, financial risk modeling, and cash flow forecasting"
+  # Finance, Economics, Statistics: "Bachelor's degree in Finance, Economics, Statistics, or other related fields"
+  # accounting principles, financial statements, business models: "Strong knowledge of accounting principles and comfort evaluating financial statements and business models"
+  # credit risk, mitigation strategies: "outline potential credit risks and present dynamic mitigation strategies"
+  # SQL: "Strong technical expertise, including demonstrated experience with SQL"
+  # data visualization: "Strong data visualization skills and a passion for data and analysis"
+  required_keywords: ['credit underwriting', 'financial risk modeling', 'cash flow forecasting', 'Finance', 'Economics', 'Statistics', 'accounting principles', 'financial statements', 'business models', 'credit risk', 'mitigation strategies', 'SQL', 'data visualization']
 - job_id: 1907
   title: Enterprise Account Executive, Revenue Suite
   company: stripe
@@ -2409,7 +2441,16 @@
     ai_ml_engineer: 20
     software_engineer: 90
     data_scientist: 20
-  required_keywords: ["API design", "abstractions", "frameworks", "client libraries", "infrastructure", "serverless", "incident response", "on-call", "Java", "Ruby", "Python", "Go"]
+  # technical leadership: "5+ years in a strategic technical leadership role"
+  # API design, abstractions, frameworks, client libraries, developer products: "leading engineering team(s) working on API design, abstractions, frameworks, or client libraries (e.g., building internal or external developer products)"
+  # infrastructure: "Hands-on experience building infrastructure and products for internal or external customers"
+  # Java, Ruby, Python, Go: "Proficient in at least one of the programming languages (Java, Ruby, Python, Go)"
+  # databases, logging, event streams, metrics, caching: "common infrastructure platforms (databases, logging, event streams, metrics, caching, etc.)"
+  # distributed teams: "Experience leading partially remote and distributed teams"
+  # in-house frameworks, abstraction ecosystems: "developing sustainable, in-house framework and abstraction ecosystems in large engineering orgs"
+  # serverless: "Experience building serverless platforms"
+  # incident response, on-call: "managing rigorous incident response processes and on-call rotations"
+  required_keywords: ['technical leadership', 'API design', 'abstractions', 'frameworks', 'client libraries', 'developer products', 'infrastructure', 'Java', 'Ruby', 'Python', 'Go', 'databases', 'logging', 'event streams', 'metrics', 'caching', 'distributed teams', 'in-house frameworks', 'abstraction ecosystems', 'serverless', 'incident response', 'on-call']
 - job_id: 2268
   title: Technical Account Manager, AI User Segment
   company: stripe
@@ -2735,7 +2776,14 @@
     ai_ml_engineer: 80  
     software_engineer: 20
     data_scientist: 20
-  required_keywords: ["Large Language Models", "RLHF", "RLAIF", "safety alignment", "constitutional AI", "governance frameworks", "responsible AI", "AI safety", "AI ethics", "human preferences", "safety evaluation"]
+  # Python: "Are a very experienced Python programmer"
+  # machine learning: "Have good machine learning research experience"
+  # Large Language Models, Claude: "developing software that utilizes Large Language Models such as Claude"
+  # pair programming: "Enjoy pair programming (we love to pair!)"
+  # LLM: "partner with world-class ML researchers to develop new LLM capabilities"
+  # agentic systems: "Building complex agentic systems that utilize LLMs"
+  # distributed information retrieval systems, search engines, knowledge graphs, RAG, indexing, ranking, query understanding, distributed data processing: "scalable distributed information retrieval systems, such as search engines, knowledge graphs, RAG, indexing, ranking, query understanding, and distributed data processing"
+  required_keywords: ['Python', 'machine learning', 'Large Language Models', 'Claude', 'pair programming', 'LLM', 'agentic systems', 'distributed information retrieval systems', 'search engines', 'knowledge graphs', 'RAG', 'indexing', 'ranking', 'query understanding', 'distributed data processing']
 - job_id: 2594
   title: Scaled Enterprise Account Executive, Industries
   company: anthropic
@@ -3035,7 +3083,19 @@
     ai_ml_engineer: 90
     software_engineer: 80
     data_scientist: 75
-  required_keywords: ['Machine Learning', 'Deep Learning', 'Generative AI', 'Neural Networks', 'Python', 'PyTorch', 'TensorFlow', 'Scikit-learn', 'Data Science', 'AI Ethics', 'AI Safety', 'AI Governance']
+  # high-performance systems software, libraries, SDKs, developer-facing APIs: "experience building high-performance systems software, with meaningful time spent maintaining libraries, SDKs, or developer-facing APIs"
+  # Linux internals, process isolation, memory management, cgroups, namespaces: "Deep understanding of Linux internals: process isolation, memory management, cgroups, namespaces, etc."
+  # containerization, virtualization, Docker, Firecracker, gVisor, QEMU, Kata Containers: "containerisation and virtualisation technologies (e.g., Docker, Firecracker, gVisor, QEMU, Kata Containers)"
+  # Go, Rust, C, C++: "Proficiency in a systems programming language such as Go, Rust, or C/C++"
+  # developer experience, API design, error propagation, documentation: "obsessing over developer experience — API design, error propagation, documentation"
+  # kernel modules, orchestration frameworks, Kubernetes: "infrastructure layers, from kernel modules to orchestration frameworks (e.g., Kubernetes)"
+  # debugging: "Strong debugging skills and the ability to navigate performance/security tradeoffs"
+  # LLM agents, agent frameworks, OpenHands, Agent2Agent, MCP: "Familiarity with LLM agents and agent frameworks (e.g., OpenHands, Agent2Agent, MCP)"
+  # multi-tenant environments, FaaS, CI sandboxes, remote notebooks: "secure workloads in multi-tenant or untrusted environments (e.g., FaaS, CI sandboxes, remote notebooks)"
+  # CRIU, VM snapshots, overlays: "snapshotting and restore techniques (e.g., CRIU, VM snapshots, overlays)"
+  # open-source contributions: "Open-source contributions to systems or developer-tools projects"
+  # on-call, incident response: "History of on-call/incident response for production systems"
+  required_keywords: ['high-performance systems software', 'libraries', 'SDKs', 'developer-facing APIs', 'Linux internals', 'process isolation', 'memory management', 'cgroups', 'namespaces', 'containerization', 'virtualization', 'Docker', 'Firecracker', 'gVisor', 'QEMU', 'Kata Containers', 'Go', 'Rust', 'C', 'C++', 'developer experience', 'API design', 'error propagation', 'documentation', 'kernel modules', 'orchestration frameworks', 'Kubernetes', 'debugging', 'LLM agents', 'agent frameworks', 'OpenHands', 'Agent2Agent', 'MCP', 'multi-tenant environments', 'FaaS', 'CI sandboxes', 'remote notebooks', 'CRIU', 'VM snapshots', 'overlays', 'open-source contributions', 'on-call', 'incident response']
 - job_id: 2809
   title: Machine Learning Fellow - Human Frontier Collective (Canada)
   company: scaleai
@@ -3110,7 +3170,11 @@
     ai_ml_engineer: 90
     software_engineer: 80
     data_scientist: 75
-  required_keywords: ['Machine Learning', 'Deep Learning', 'Generative AI', 'Neural Networks', 'Python', 'PyTorch', 'TensorFlow', 'Scikit-learn', 'Data Science', 'AI Ethics', 'AI Safety', 'AI Governance']
+  # Computer Science, Computer Engineering: "PhD or postdoctoral degree in Computer Science, Computer Engineering, or a related field"
+  # Machine Learning Engineer, Data Scientist: "1-3+ years of experience as a Machine Learning Engineer or Data Scientist"
+  # Python, ML frameworks, PyTorch, TensorFlow: "Strong proficiency in Python and modern ML frameworks (PyTorch, TensorFlow)"
+  # cloud infrastructure, AWS, MLOps, Docker, Langchain: "cloud infrastructure (AWS) and MLOps tools (Docker, Langchain) is a plus"
+  required_keywords: ['Computer Science', 'Computer Engineering', 'Machine Learning Engineer', 'Data Scientist', 'Python', 'ML frameworks', 'PyTorch', 'TensorFlow', 'cloud infrastructure', 'AWS', 'MLOps', 'Docker', 'Langchain']
 - job_id: 2829
   title: Product Manager, Gen AI
   company: scaleai
@@ -3578,7 +3642,11 @@
     ai_ml_engineer: 90
     software_engineer: 80
     data_scientist: 75
-  required_keywords: ['Machine Learning', 'Deep Learning', 'Generative AI', 'Neural Networks', 'Python', 'PyTorch', 'TensorFlow', 'Scikit-learn', 'Data Science', 'AI Ethics', 'AI Safety', 'AI Governance']
+  # technical consulting, post-sales engineering, solutions architecture: "5+ years of technical consulting, post-sales engineering, solutions architecture, or similar experience"
+  # AI coding tools, developer workflow: "an active power user of AI coding tools and have deeply customized your own developer workflow"
+  # Codex: "clearly articulate what Codex can enable"
+  # technical training, workshops: "delivering large, high-impact workshops or technical training to engineering teams"
+  required_keywords: ['technical consulting', 'post-sales engineering', 'solutions architecture', 'AI coding tools', 'developer workflow', 'Codex', 'technical training', 'workshops']
 - job_id: 3273
   title: State Government Affairs Lead (Northeast Region)
   company: openai
@@ -3764,7 +3832,14 @@
     ai_ml_engineer: 70
     software_engineer: 80
     data_scientist: 75
-  required_keywords: ['Machine Learning', 'Deep Learning', 'Generative AI', 'Neural Networks', 'Python', 'PyTorch', 'TensorFlow', 'Scikit-learn', 'Data Science', 'AI Ethics', 'AI Safety', 'AI Governance']
+  # embedded camera systems, sensor bring-up, driver development, board-level debugging: "Deep experience shipping embedded camera systems, including sensor bring-up, driver development, and board-level debugging"
+  # C, C++, embedded systems, Linux-based systems, kernel, userspace: "Strong C/C++ experience with embedded or Linux-based systems; debugging across kernel and userspace boundaries"
+  # camera hardware interfaces, MIPI CSI, sensor control buses, power sequencing, reset sequencing, clocking, sequencing: "common camera hardware interfaces (for example, MIPI CSI and sensor control buses)... power, reset, clocking, and sequencing"
+  # capture paths, debug workflows: "building reliable capture paths and effective debug workflows"
+  # SoC, camera stacks, vendor frameworks: "common mobile or embedded SoC camera stacks and vendor frameworks"
+  # hardware acceleration, camera pipelines, video encode, video decode: "debugging hardware acceleration blocks adjacent to camera pipelines, such as video encode and decode paths"
+  # capture pipelines, GStreamer, camera enablement: "building higher-level capture pipelines (for example, GStreamer) on top of low-level camera enablement"
+  required_keywords: ['embedded camera systems', 'sensor bring-up', 'driver development', 'board-level debugging', 'C', 'C++', 'embedded systems', 'Linux-based systems', 'kernel', 'userspace', 'camera hardware interfaces', 'MIPI CSI', 'sensor control buses', 'power sequencing', 'reset sequencing', 'clocking', 'sequencing', 'capture paths', 'debug workflows', 'SoC', 'camera stacks', 'vendor frameworks', 'hardware acceleration', 'camera pipelines', 'video encode', 'video decode', 'capture pipelines', 'GStreamer', 'camera enablement']
 - job_id: 3310
   title: Backend Engineer, Consumer Devices
   company: openai
@@ -3834,7 +3909,14 @@
     ai_ml_engineer: 50
     software_engineer: 0
     data_scientist: 0
-  required_keywords: ['Python', 'Go', 'System Design', 'Performance Optimization', 'Security Best Practices', 'Distributed Systems', 'Cloud Architectures', 'Hardware-Cloud Integrations', 'Applied AI Services']
+  # backend systems: "7+ years of professional software engineering experience, with a focus on backend systems"
+  # Python, Go, server-side technologies: "proficient with Python and Go, and familiar with a range of server-side technologies"
+  # system design, performance optimization, security best practices: "strong grasp of system design, performance optimization, and security best practices"
+  # full-stack, cloud infrastructure: "reason about full-stack tradeoffs from hardware through cloud infrastructure"
+  # distributed systems, cloud architectures: "(Nice to have) experience with distributed systems and cloud architectures"
+  # instrumentation, analytics, performance tuning: "(Nice to have) background in instrumentation, analytics, and performance tuning"
+  # hardware-cloud integrations, applied AI services: "(Nice to have) familiar with hardware-cloud integrations or applied AI services"
+  required_keywords: ['backend systems', 'Python', 'Go', 'server-side technologies', 'system design', 'performance optimization', 'security best practices', 'full-stack', 'cloud infrastructure', 'distributed systems', 'cloud architectures', 'instrumentation', 'analytics', 'performance tuning', 'hardware-cloud integrations', 'applied AI services']
 - job_id: 3312
   title: Frontend Engineer, Financial Web Platform
   company: openai
@@ -4201,7 +4283,10 @@
     ai_ml_engineer: 86
     software_engineer: 70
     data_scientist: 50
-  required_keywords: ['robust evals']
+  # machine learning, machine learning applications: "deep understanding of machine learning and machine learning applications"
+  # evaluations, model capability improvement: "building evaluations for model capability improvement"
+  # ML codebase: "comfortable diving into a large ML codebase to debug"
+  required_keywords: ['machine learning', 'machine learning applications', 'evaluations', 'model capability improvement', 'ML codebase']
 - job_id: 3704
   title: Data Center Compute Infrastructure
   company: openai
