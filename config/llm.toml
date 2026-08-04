@@ -1,0 +1,26 @@
+# LLM routing config. See specs/05-model-routing.md.
+#
+# No API key lives here, ever (CLAUDE.md hard rule 10). The Anthropic
+# provider is off by default (llm.api.enabled = false) and no stage below
+# routes to it; enabling it is a deliberate, separate act, not a config
+# edit alone (see router.py's get_provider()).
+
+[llm.local]
+enabled   = true
+base_url  = "${OLLAMA_BASE_URL}"
+model     = "qwen3.5:9b-q4_K_M"
+context   = 16384
+timeout_s = 120
+
+[llm.routing]
+relevance = "local"
+extract   = "local"
+rephrase  = "local"
+
+[llm.fallback]
+relevance = "skip"      # unscored jobs stay in the queue, unranked
+extract   = "fail"      # cannot proceed without keywords
+rephrase  = "skip"      # falls through to P4, logs to gap ledger
+
+[llm.api]
+enabled = false

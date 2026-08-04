@@ -4,24 +4,24 @@
 the end via `/checkpoint`. Do not rely on memory of previous sessions.**
 
 Last updated: 2026-08-03
-Current task: C2 (eval fixture set) is **done**. All 50 JDs in
-`tests/fixtures/eval/human_labels.yaml` labelled by the user with
-non-null relevance scores across all three profiles (verified directly,
-zero nulls, zero malformed values remaining after fixing a batch of
-"90S"/"0S"/"70S" string-typo values found during the completeness check),
-loaded into the real `human_labels` table (150 rows, 50 jobs x 3
-profiles, confirmed idempotent on re-run). 11 of the 50 have
-hand-extracted `required_keywords`, short of TODO.md's literal "15"
-target; marked done anyway per explicit user sign-off, flagged honestly
-here rather than silently rounded up (see Known Issues). Along the way,
-this session also found and fixed a real, previously-undetected bug: every
-Greenhouse-sourced job's stored `description` contained raw HTML markup,
-not plain text (see D22/D23 addendum in docs/decisions.md), fixed in
-`greenhouse.py` and backfilled across all 2,691 affected rows with
-before/after verification.
-Next: your call between C1 (LLM router), C3 (keyword extraction, now
-unblocked with real human_labels to calibrate against), B3-followup, or
-A4b.
+Current task: C1 (LLM router + local Ollama provider) is **done**. New
+`src/jobengine/llm/` package (`schemas.py`, `providers/{local,anthropic}.py`,
+`router.py`, `check.py`) plus `config/llm.toml` implement spec 05's router:
+`think=False` is set explicitly on every local call, never left to a
+Modelfile default, and the Anthropic billing guard is two independent
+layers (an explicit `api_key` argument required at both
+`AnthropicProvider.__init__` and `router.get_provider()`,
+`config.llm.api.enabled` defaults false, no stage routes to `"api"`,
+neither module ever reads `os.environ` for a key), see D25 in
+docs/decisions.md. 21 new tests pass against a mocked `ollama` client, and
+`uv run python -m jobengine.llm.check` was then run live against the real
+WSL2/Windows Ollama setup by the user: all three stages reachable, exit
+code 0, cold-start latency 14,945ms on the first call after Ollama loads
+the model, steady-state 600-935ms across 3 consecutive clean runs after
+that (see Known Issues, flagged so a future session's first check of the
+day isn't mistaken for a regression).
+Next: your call between C3 (keyword extraction, now unblocked with both
+real human_labels and a real router), B3-followup, or A4b.
 
 Separately: B2's unattended-overnight proof is now **resolved**. Windows
 Task Scheduler task `job-engine-sync` fired on its own twice on 2026-08-03
@@ -60,7 +60,7 @@ project's own B1/B2 sessions) treated that file.
 | B1-followup | Sponsorship-aware company vetting (DOL LCA) | not started | flagged only, not scoped, see TODO.md |
 | B3 | Filters + routing | done | signed off 2026-08-03; `filter.py` implemented, 40/40 tests pass, final numbers 859/3836 survivors (68/776/81 per profile) |
 | B3-followup | Calibrate daily filter-survivor cap | not started | deliberately deferred, see D23 in docs/decisions.md |
-| C1 | LLM router | not started | |
+| C1 | LLM router | done | `llm.check` verified live against real Ollama, all 3 stages reachable, exit 0; cold-start ~15s / steady-state 600-935ms, see Known Issues |
 | C2 | Eval fixtures | done | 50/50 JDs labelled, loaded into `human_labels` (150 rows); 11/15 keyword-annotated, short of TODO.md's literal target, done anyway per explicit sign-off, see Known Issues |
 | C3 | Keyword extraction | not started | unblocked now that real human_labels exist to calibrate against |
 | C4 | Relevance filter | not started | |
@@ -477,6 +477,80 @@ Status values: `not started` | `in progress` | `blocked` | `done`
   depending on how much of the real file happens to be labelled at any
   given time.
 
+- `src/jobengine/llm/` (new package, C1): `schemas.py` (`LocalConfig`,
+  `RoutingConfig`, `FallbackConfig`, `ApiConfig`, `LLMConfig` pydantic
+  models mirroring `config/llm.toml`'s shape, plus `LLMCallResult`, the
+  per-call accounting envelope: stage, provider, model, input/output
+  tokens, duration_ms, cost_usd, output. This module writes to no table;
+  the envelope is returned to whichever stage calls it, and C3/C4 persist
+  whichever fields their own table has columns for, per
+  specs/00-data-model.md's `job_analysis`/`relevance_scores` column
+  lists), `providers/local.py` (`LocalProvider`, wraps
+  `ollama.AsyncClient`; `call()` always passes `think=False` and
+  `format=schema.model_json_schema()` explicitly on every request, one
+  call site, no Modelfile default relied on; accepts an injectable
+  `client` kwarg so tests never hit a real network, same DI pattern
+  `sources/greenhouse.py` already uses for `httpx.MockTransport`),
+  `providers/anthropic.py` (`AnthropicProvider`, guard-only, see D25 in
+  docs/decisions.md: constructor requires an explicit `api_key`, never
+  reads `os.environ`, and `call()` always raises `NotImplementedError`,
+  since no stage in spec 05's routing table uses it), `router.py`
+  (`load_config()` reads `config/llm.toml` via `tomllib` matching
+  `render.py`'s `identity.toml` precedent, expanding `${OLLAMA_BASE_URL}`
+  by hand and raising a clear `RuntimeError` if unset rather than
+  computing a fallback; `get_provider()` is the billing guard's second,
+  independent layer, refusing `"api"`-tier construction unless
+  `config.llm.api.enabled` and an explicit `api_key` were both given to
+  that call; `call()` applies the configured fallback (`skip`/`fail`)
+  only around a constructed provider's `.call()`, never around
+  `get_provider()` itself, so a refused Anthropic construction always
+  raises regardless of the stage's fallback setting), and `check.py`
+  (`uv run python -m jobengine.llm.check`, per-stage provider/
+  reachability/latency, exits non-zero if any stage's provider would
+  resolve to a constructed `AnthropicProvider` under the loaded config).
+  All of `router.py`/`providers/*.py`'s public calls are `async def`
+  (matching `sources/greenhouse.py`/`ashby.py`'s precedent for I/O-bound
+  leaf functions meant to be awaited by a caller or driven via
+  `asyncio.run()` in tests, not `sources/sync.py`'s pattern of a sync
+  top-level function wrapping `asyncio.run()` internally; `check.py`'s
+  `main()` is the one place that wraps with `asyncio.run()`, since it's
+  the actual CLI entry point). No new dependency: `ollama` was already in
+  `pyproject.toml`, unused until this session.
+- `config/llm.toml`: new, mirrors spec 05's TOML block exactly
+  (`[llm.local]`, `[llm.routing]`, `[llm.fallback]`) plus a `[llm.api]
+  enabled = false` section spec 05's example block doesn't show but the
+  billing guard needs something to check; no API key in this file, ever.
+- `tests/test_llm_local_provider.py` (7 tests): `think=False` present on
+  every call, `format=` carries the schema's JSON schema, `options.num_ctx`
+  matches the configured context window, and the returned envelope has
+  `cost_usd == 0.0` with real token counts from the (faked) response.
+- `tests/test_llm_router.py` (13 tests): `load_config()`'s env-var
+  expansion and its clear-error-on-missing-var path (against a real
+  written-to-`tmp_path` `llm.toml`, not just in-memory config objects);
+  `get_provider()`'s guard in all four combinations (local tier always
+  works; api tier refused when disabled; api tier refused when enabled but
+  no key passed; api tier constructs only with both); a dedicated test
+  that sets a real `ANTHROPIC_API_KEY` env var and confirms construction
+  is still refused, the literal "nearly impossible to trigger by
+  accident" property from CLAUDE.md hard rule 9; `call()`'s skip/fail
+  fallback behavior; and that a billing-guard `RuntimeError` from
+  `get_provider()` is never swallowed by a stage's `"skip"` fallback.
+- `tests/test_llm_check.py` (6 tests): exercises `_check_stage`/`_run`
+  directly with a monkeypatched `get_provider`, not a real Ollama server,
+  covering refused/reachable/unreachable per-stage outcomes and the
+  overall exit-code assertion (0 when no stage would construct
+  `AnthropicProvider`, 1 when one would, including the defensive case
+  where `get_provider` is monkeypatched to return one despite the default
+  config, since that should never happen in practice but `check.py` must
+  still catch it if it ever did).
+- **`uv run python -m jobengine.llm.check` verified live**, by the user,
+  against the real WSL2/Windows Ollama setup: all three stages
+  (`relevance`/`extract`/`rephrase`) reachable, exit code 0. Cold-start
+  latency 14,945ms on the first call after Ollama loads the model into
+  memory, steady-state 600-935ms on repeat calls after that, confirmed by
+  3 consecutive clean runs with no per-stage anomaly. See Known Issues for
+  why the cold-start number is expected, not a regression signal.
+
 ---
 
 ## Known issues and deferred work
@@ -719,6 +793,51 @@ Status values: `not started` | `in progress` | `blocked` | `done`
   descriptions ever look wrong again after a Greenhouse API change, that
   assumption is the first thing to check, per the code comment's own
   explicit note.
+- **C1's `llm.check` cold-start latency is expected, not a regression
+  signal: read this before treating a slow first check of the day as a
+  bug.** Verified live by the user against the real WSL2/Windows Ollama
+  setup: the *first* call after Ollama has to load the 9B model into VRAM
+  took 14,945ms; every call after that, across 3 consecutive clean runs,
+  landed at 600-935ms with no per-stage anomaly. Ollama unloads an idle
+  model after its own keep-alive window, so the first `llm.check` (or
+  first real pipeline run) after any gap, restart, or the start of a new
+  day will very likely pay this same one-time cold-start cost again. If a
+  future session sees one slow stage followed by fast ones in the same
+  run, or a slow run after a period of inactivity, check whether it's just
+  this before assuming something regressed.
+  Before this live run, this session's own automated coverage was: 21
+  tests against a mocked `ollama` client (no real network), plus
+  `router.load_config()`'s missing-`OLLAMA_BASE_URL` path manually
+  exercised against the real `config/llm.toml` (confirmed it raises the
+  intended clear `RuntimeError`, not a parse error), plus one partial live
+  check against a deliberately unreachable address (no real Ollama
+  involved) that caught and led to fixing a real gap: the `UNREACHABLE`
+  detail string was empty because `httpx`'s own connect/timeout exceptions
+  often carry no message text, fixed in `check.py`
+  (`f"{type(exc).__name__}: {exc}"` instead of bare `str(exc)`). The live
+  run against a genuinely reachable Ollama server, described above, is
+  what actually closes out C1's DoD.
+- `providers/anthropic.py`'s `AnthropicProvider.call()` always raises
+  `NotImplementedError`. This is deliberate, not a placeholder to fill in
+  casually: see D25 in docs/decisions.md. No stage in spec 05's routing
+  table uses the `"api"` tier, and CLAUDE.md hard rule 9 requires stopping
+  to ask before a stage is ever wired to a paid call. `ApiConfig` in
+  `schemas.py` likewise only has `enabled: bool`, no model name or other
+  config, since none of that has been decided yet.
+- `jobengine.llm.router.call()` and the providers return an
+  `LLMCallResult` envelope but write nothing to the db themselves. No
+  `llm_calls`-style table exists in `schema.sql`; per
+  specs/00-data-model.md, the token/cost/model accounting columns live on
+  the consuming table (`job_analysis`, `relevance_scores`), so persisting
+  the envelope is C3/C4's job when those stages call `router.call()`, not
+  C1's. Flagging so a future session doesn't go looking for where C1
+  wrote its own accounting and conclude something's missing.
+- No downstream stage calls `jobengine.llm.router` yet; C1 is the router
+  and local provider only, per TODO.md's scope. C3 (keyword extraction)
+  is the first real caller and will be the first place `router.call()`'s
+  actual ergonomics (async, the `LLMCallResult` envelope shape, the
+  `local_client=`/`api_key=` injection points) get exercised by something
+  other than this session's own tests.
 
 ---
 
@@ -924,6 +1043,42 @@ Status values: `not started` | `in progress` | `blocked` | `done`
   (a real schema-shape mismatch between the fixture's one-list-per-job
   design and the table's per-profile keying) to warrant its own decision
   number, not folded into an existing one.
+- C1's Anthropic guard is two independent layers (explicit `api_key`
+  required at both `AnthropicProvider.__init__` and
+  `router.get_provider()`, neither module ever reading `os.environ` for a
+  key) and `AnthropicProvider.call()` is a permanent
+  `NotImplementedError` stub, not a real client, since no stage in spec
+  05's routing table uses the `"api"` tier. Significant enough (directly
+  implements CLAUDE.md hard rule 9's "nearly impossible to trigger by
+  accident" requirement, and a future session could otherwise mistake the
+  stub for an unfinished TODO) to get its own entry: D25 in
+  docs/decisions.md.
+- Before coding, confirmed two choices with the user rather than guessing:
+  (1) `router.load_config()` raises a clear `RuntimeError` if
+  `OLLAMA_BASE_URL` is unset, rather than computing a fallback via `ip
+  route show default` the way spec 05's WSL2 section shows as a manual
+  shell command; (2) this session builds and unit-tests C1 against a
+  mocked `ollama` client only, the real `uv run python -m
+  jobengine.llm.check` run against live Ollama is left for the user to do
+  separately. Not added to docs/decisions.md as their own numbered
+  entries: (1) is a small, self-contained implementation choice fully
+  captured in `router.py`'s own error message and docstring, and (2) is a
+  verification-sequencing choice, not a design decision, same category as
+  A4's "manual Word check" process note rather than a D-numbered decision.
+- `router.py`/`providers/local.py`/`providers/anthropic.py`'s public
+  `call()` methods are `async def`, awaited directly or driven via
+  `asyncio.run()` by callers/tests, matching `sources/greenhouse.py`'s and
+  `ashby.py`'s precedent for I/O-bound leaf functions. Not
+  `sources/sync.py`'s pattern (a sync top-level function wrapping
+  `asyncio.run()` internally so callers never touch async): that pattern
+  fits a single top-level orchestration entry point, and `router.call()`
+  is a leaf function meant to be composed by a future async caller (C3/C4
+  processing many jobs), same role as `fetch_board()`, not a top-level
+  entry point itself. `check.py`'s `main()` is the one place in this
+  package that does wrap with `asyncio.run()`, since it is the actual CLI
+  entry point. Not asked separately: a direct convention match, same
+  reasoning already applied without asking to `pipeline/__init__.py` in
+  the B3 session.
 
 ---
 
@@ -931,6 +1086,59 @@ Status values: `not started` | `in progress` | `blocked` | `done`
 
 (Newest first. Date, task id, what changed, what to do next.)
 
+- 2026-08-03, C1 (done): The one thing left after the prior entry below,
+  the live `uv run python -m jobengine.llm.check` run against a real
+  Ollama server, is now done: the user ran it against the real WSL2/
+  Windows setup and confirmed all three stages (`relevance`/`extract`/
+  `rephrase`) reachable, exit code 0. Cold-start latency 14,945ms on the
+  first call (Ollama loading the 9B model into VRAM), steady-state
+  600-935ms across 3 consecutive clean runs after that, no per-stage
+  anomaly. Recorded prominently in Known Issues, flagged specifically so a
+  future session's first check of the day (after any restart or idle
+  gap, when Ollama will have unloaded the model again) doesn't get
+  mistaken for a regression. TODO.md's C1 checkbox now checked, Status
+  table marked `done`. No code changed this entry beyond the prior one;
+  `uv run pytest` still 167/167 passing, `ruff check`/`format --check`
+  still clean on everything this session touched (pre-existing
+  `test_render.py` `RUF059`/formatting debt untouched, same as every
+  prior checkpoint). Next: your call between C3 (keyword extraction, now
+  unblocked with both real human_labels and a real, live-verified
+  router), B3-followup, or A4b.
+- 2026-08-03, C1 (built, not yet done): Planned against specs/05-model-
+  routing.md and PROGRESS.md before writing any code; confirmed with the
+  user that the plan must set `think=False` explicitly on every local
+  Ollama call (never a Modelfile default) and that the Anthropic billing
+  guard must be nearly impossible to trigger by accident per CLAUDE.md
+  hard rule 9. Built `src/jobengine/llm/` (`schemas.py`, `providers/
+  {local,anthropic}.py`, `router.py`, `check.py`) and `config/llm.toml`
+  (new file, mirrors spec 05's TOML block plus a `[llm.api] enabled =
+  false` section the guard needs). `LocalProvider.call()` sets `think`
+  and `format=schema.model_json_schema()` on one call site, backed by
+  `test_call_sets_think_false_explicitly`. The Anthropic guard is two
+  independent layers (explicit `api_key` required at both
+  `AnthropicProvider.__init__` and `router.get_provider()`, neither
+  module ever reading `ANTHROPIC_API_KEY` or any other env var), verified
+  by a test that sets `ANTHROPIC_API_KEY` in the environment and confirms
+  construction is still refused; `AnthropicProvider.call()` itself is a
+  permanent `NotImplementedError` stub since no stage uses that tier. See
+  D25 in docs/decisions.md. Before coding, asked and got two explicit
+  answers: missing `OLLAMA_BASE_URL` raises a clear config error rather
+  than auto-computing a fallback, and this session builds against a
+  mocked `ollama` client only, with the real `uv run python -m
+  jobengine.llm.check` run against live Ollama left for the user. 21 new
+  tests (`test_llm_local_provider.py`, `test_llm_router.py`,
+  `test_llm_check.py`), all passing; `uv run pytest` 167/167 passing;
+  `ruff check`/`format --check` clean on everything touched this session
+  (the pre-existing 3 `RUF059` findings in `test_render.py` are untouched,
+  not introduced here). Manually confirmed `router.load_config()`'s
+  missing-env-var path against the real `config/llm.toml` (raises the
+  intended `RuntimeError`, not a parse error). **Not done:** the real
+  `llm.check` run against a reachable Ollama server, which is what
+  TODO.md's literal C1 DoD line asks for; Status table marks C1 `in
+  progress`, TODO.md's checkbox left unchecked, until that happens. Next:
+  run `uv run python -m jobengine.llm.check` yourself, then your call
+  between C3 (keyword extraction, now unblocked with both real
+  human_labels and a real router), B3-followup, or A4b.
 - 2026-08-03, C2 (done) + unplanned greenhouse.py bug fix and backfill:
   Built C2's scaffolding (`tests/fixtures/eval/human_labels.yaml` seeded
   from 50 real JDs, `src/jobengine/eval/fixtures.py`'s `load_human_labels`,

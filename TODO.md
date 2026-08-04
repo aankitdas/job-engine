@@ -91,9 +91,15 @@ Snapshot history cannot be backfilled.
 
 ## Phase C: Local intelligence
 
-- [ ] **C1. LLM router + Ollama provider** (`specs/05-model-routing.md`)
+- [x] **C1. LLM router + Ollama provider** (`specs/05-model-routing.md`)
   Done: `llm.check` reports reachable local, and exits non-zero if any
   Anthropic provider would be constructed under default config.
+  (Closed 2026-08-03: `llm.check` run live against the real WSL2/Windows
+  Ollama setup, all three stages reachable, exit code 0. Cold-start
+  latency 14,945ms on the first call after Ollama loads the model,
+  steady-state 600-935ms across 3 consecutive clean runs after that, see
+  PROGRESS.md Known Issues so a future session's first check of the day
+  isn't mistaken for a regression.)
 
 - [x] **C2. Eval fixture set** (`specs/07-model-eval.md`)
   Done: 50 JDs labelled by you, 15 with hand-extracted keywords, in

@@ -328,3 +328,37 @@ near-zero-relevance profile row would be meaningless. Confirmed by
 verifying real data supports this: on the 11 real keyword-annotated jobs,
 max relevance ranges 50-100 (mean 83.3), vs. 0-30 (mean 3.4) on the 39
 without, so the correlation this design assumes actually holds.
+
+**D25. C1's Anthropic guard is two independent layers, and
+`AnthropicProvider.call()` is a permanent stub that always raises
+`NotImplementedError`, not a real client.** CLAUDE.md hard rule 9 says an
+accidental paid call must be nearly impossible, not merely discouraged, and
+spec 05's routing table has no stage that routes to `"api"` today (the
+monthly base-resume stage uses interactive Claude Code directly, not this
+router). Layer one: `providers/anthropic.py`'s `AnthropicProvider.__init__`
+requires an explicit `api_key` argument and the module never reads
+`os.environ` anywhere, so there is no code path in that file that could
+pick up a stray `ANTHROPIC_API_KEY`. Layer two: `router.get_provider()`
+separately refuses to construct it unless `config.llm.api.enabled is True`
+**and** a caller passes `api_key` explicitly to that specific function
+call; `router.py` also never reads `os.environ` for a key. The two guards
+are deliberately redundant, not layered for defense-in-depth alone: either
+one alone would already stop the default config from ever constructing the
+provider, confirmed by
+`test_get_provider_never_reads_anthropic_api_key_from_environment` in
+`tests/test_llm_router.py`, which sets `ANTHROPIC_API_KEY` in the test
+environment and confirms construction is still refused.
+
+Since no stage needs it yet, `AnthropicProvider.call()` was not
+implemented at all beyond the guard scaffolding: it always raises
+`NotImplementedError` with a message pointing back at hard rule 9 ("stop
+and ask"). `ApiConfig` in `schemas.py` also only has `enabled: bool`, no
+model name or other real config, since none of that has been decided.
+Not confirmed by asking as its own question this session (the two
+`AskUserQuestion` exchanges before coding covered the missing-env-var
+behavior and live-vs-mocked verification, not this); this follows directly
+from hard rule 9's own literal wording and spec 05's routing table having
+zero `"api"` stages, so it wasn't treated as a separate ambiguity worth
+interrupting for. Revisit only when a real stage is deliberately added
+that needs a paid call, which per hard rule 9 requires stopping and asking
+first, not a design this module should silently grow toward.
