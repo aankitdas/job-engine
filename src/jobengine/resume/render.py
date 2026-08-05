@@ -27,9 +27,9 @@ from jobengine.resume.bank import Bank, Education, Publication, Role
 
 DEFAULT_IDENTITY_PATH = Path("identity.toml")
 
-_FONT = "Arial"
-_MARGIN = Twips(720)
-_TAB_POSITION = Twips(10800)
+FONT = "Arial"
+MARGIN = Twips(720)
+TAB_POSITION = Twips(10800)
 # Matches the template's own Hyperlink character style (w:color w:val="467886").
 _HYPERLINK_COLOR = "467886"
 
@@ -101,7 +101,7 @@ class RenderProfile:
 
 def _set_run_style(run, style_key: str) -> None:
     style = _TYPOGRAPHY[style_key]
-    run.font.name = _FONT
+    run.font.name = FONT
     run.font.size = style.size
     run.font.bold = style.bold
     run.font.italic = style.italic
@@ -129,9 +129,24 @@ def _add_hyperlink_run(paragraph, url: str, text: str, style_key: str) -> None:
     paragraph._p.append(hyperlink)
 
 
+def _new_paragraph(doc: Document):
+    """The one place every paragraph in this module gets created. python-docx
+    builds documents from its own bundled default template, whose
+    docDefaults sets w:after="200" (10pt); left alone, every paragraph
+    inherits that as an extra gap below it, on top of whatever line_spacing
+    is set. The real template (docs/headless-headhunter/template.docx)
+    explicitly zeroes both w:before and w:after on every paragraph that sets
+    w:spacing at all, confirmed by reading its raw XML, so both are zeroed
+    here rather than left to inherit."""
+    paragraph = doc.add_paragraph()
+    paragraph.paragraph_format.space_before = Pt(0)
+    paragraph.paragraph_format.space_after = Pt(0)
+    return paragraph
+
+
 def _add_paragraph(doc: Document, text: str, style_key: str):
     style = _TYPOGRAPHY[style_key]
-    paragraph = doc.add_paragraph()
+    paragraph = _new_paragraph(doc)
     paragraph.alignment = style.alignment
     paragraph.paragraph_format.line_spacing = style.line_spacing
     if text:
@@ -141,7 +156,7 @@ def _add_paragraph(doc: Document, text: str, style_key: str):
 
 
 def _add_blank(doc: Document) -> None:
-    paragraph = doc.add_paragraph()
+    paragraph = _new_paragraph(doc)
     paragraph.paragraph_format.line_spacing = _TYPOGRAPHY["bullet"].line_spacing
 
 
@@ -186,11 +201,11 @@ def _add_right_tab_paragraph(
     text length; a tab stop holds the right margin regardless of how long
     `before` runs, which is the whole point of a tab stop over spaces."""
     style = _TYPOGRAPHY[style_key]
-    paragraph = doc.add_paragraph()
+    paragraph = _new_paragraph(doc)
     paragraph.alignment = style.alignment
     paragraph.paragraph_format.line_spacing = style.line_spacing
     paragraph.paragraph_format.tab_stops.add_tab_stop(
-        _TAB_POSITION, WD_TAB_ALIGNMENT.RIGHT
+        TAB_POSITION, WD_TAB_ALIGNMENT.RIGHT
     )
     run = paragraph.add_run(f"{before}\t{after}")
     _set_run_style(run, style_key)
@@ -243,7 +258,7 @@ def _render_publications(doc: Document, publications: list[Publication]) -> None
     _add_section_header(doc, "Publications")
     style = _TYPOGRAPHY["publication"]
     for pub in publications:
-        paragraph = doc.add_paragraph()
+        paragraph = _new_paragraph(doc)
         paragraph.alignment = style.alignment
         paragraph.paragraph_format.line_spacing = style.line_spacing
 
@@ -258,10 +273,10 @@ def _render_publications(doc: Document, publications: list[Publication]) -> None
 
 def _set_margins(doc: Document) -> None:
     section = doc.sections[0]
-    section.top_margin = _MARGIN
-    section.bottom_margin = _MARGIN
-    section.left_margin = _MARGIN
-    section.right_margin = _MARGIN
+    section.top_margin = MARGIN
+    section.bottom_margin = MARGIN
+    section.left_margin = MARGIN
+    section.right_margin = MARGIN
 
 
 def _add_contact_line(doc: Document, identity: Identity) -> None:
@@ -269,7 +284,7 @@ def _add_contact_line(doc: Document, identity: Identity) -> None:
     other four are short labels, each a real hyperlink relationship to the
     identity.toml URL, never the raw URL as visible text."""
     style = _TYPOGRAPHY["contact"]
-    paragraph = doc.add_paragraph()
+    paragraph = _new_paragraph(doc)
     paragraph.alignment = style.alignment
     paragraph.paragraph_format.line_spacing = style.line_spacing
 

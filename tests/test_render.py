@@ -89,6 +89,12 @@ def _assert_paragraph_matches(paragraph, expected: Typography) -> None:
     assert paragraph.paragraph_format.line_spacing == pytest.approx(
         expected.line_spacing
     )
+    # The real template explicitly zeroes both on every paragraph that sets
+    # w:spacing at all (confirmed by reading its raw XML); python-docx's own
+    # built-in default template's docDefaults otherwise leaks an extra 200
+    # twip (10pt) w:after onto any paragraph that doesn't override it.
+    assert paragraph.paragraph_format.space_before == Pt(0)
+    assert paragraph.paragraph_format.space_after == Pt(0)
     for run in paragraph.runs:
         if not run.text.strip():
             continue

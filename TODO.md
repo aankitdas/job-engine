@@ -29,10 +29,32 @@ Read PROGRESS.md, then specs/NN-name.md. Plan first, do not write code yet.
 - [x] **A4. Docx renderer** (`specs/03-renderer.md`)
   Done: golden test passes on font, sizes, spacing, tabs, margins.
 
-- [ ] **A4b. PDF conversion** (`specs/03-renderer.md`, "PDF" section)
+- [x] **A4b. PDF conversion** (`specs/03-renderer.md`, "PDF" section)
   Render .docx, then convert with LibreOffice headless (use the pptx
   skill's wrapper in the sandbox, bare `soffice` hangs). Blocks D2 (PDF
   geometry for front-loading); must land before the rubric phase starts.
+  (Done: `src/jobengine/resume/pdf.py`'s `render_pdf()` wraps `soffice
+  --headless --convert-to pdf` directly via subprocess, not a "pptx skill"
+  wrapper, which doesn't exist in this session's environment; unique
+  throwaway `-env:UserInstallation` profile dir per call plus a 60s
+  timeout instead, the two concrete things that actually prevent headless
+  soffice hangs. `tests/test_pdf.py`, 9 tests, `subprocess.run` mocked.
+  Verified live against the real binary (LibreOffice 24.2.7.2, installed
+  by the user, not available to Claude Code directly, no passwordless
+  sudo) on two distinct real full-bank renders, not just one, via
+  `scripts/render_pdf_sample.py`: default section order (4pp) and a
+  work-history-first ordering (3pp), both valid PDF 1.7 output. Along the
+  way, found and fixed a real pre-existing renderer bug this exposed:
+  every paragraph in `render.py` was inheriting python-docx's own default
+  template's 10pt `w:after` spacing, producing a visibly larger gap
+  between bullets than the 1.5 line-height alone should give, caught by
+  the user measuring real PDF geometry with pdfplumber, not by any test.
+  Fixed via a new `_new_paragraph()` helper that zeroes `space_before`/
+  `space_after` explicitly at the one place every paragraph gets created;
+  confirmed against the real template's own XML that 0/0 is correct, not
+  a guess. Golden test gained a `space_before`/`space_after == 0`
+  assertion it didn't have before, closing a real coverage gap. Full
+  suite 200/200 after the fix.)
 
 - [ ] **A4c. Watermarking** (`specs/03-renderer.md`, "Watermarking" section)
   Diagonal "DRAFT - CONTAINS UNBUILT WORK" stamp on any render with a
@@ -126,12 +148,56 @@ Snapshot history cannot be backfilled.
 
 ## Phase D: The rubric
 
-- [ ] **D1. Rubric rules R001-R013** (`specs/08-rubric.md`)
+- [x] **D1. Rubric rules R001-R013** (`specs/08-rubric.md`)
   Done: scoring your current resume against 3 real JDs gives coverage numbers
   you agree with by hand.
+  (Done: `src/jobengine/rubric/{measure,rules,score}.py` plus a CLI
+  (`uv run python -m jobengine.rubric {score,explain}`; `patch` deferred to
+  D3). `measure.select_for_profile()` is a new, minimal, non-invented
+  candidate-resume filter (bank's own `bullet.profiles` tags only, no new
+  ranking/selection logic) added because render.py has no per-profile
+  filtering yet and R001/R003/R004/R006 need one to mean anything;
+  confirmed by asking. Grounded against real data before and after coding,
+  not just synthetic fixtures: ran C3's real `extract_keywords()` live
+  (local Ollama, zero cost) against 3 real JDs pulled from the live db
+  (Airbnb Sr SWE, DoorDash Robotics Infra, Anthropic Research Engineer),
+  and separately persisted real `job_analysis` rows via `analyze_job()`
+  against a scratch copy of the db (never the real `data/jobengine.db`,
+  per hard rule 13) to exercise the actual CLI end to end. Real numbers:
+  coverage 0.27/0.06/0.33 (all correctly fail R001's 0.70 gate; the
+  robotics job's near-zero coverage against an ML/SWE bank is exactly
+  right, not a bug), R002 front-load ratios ~0.10 (plausible pre-patch-
+  ladder, this is what P0-P2 exist to fix), R003 correctly flags
+  `role_utd_researcher` at 2 total bullets for `software_engineer` (1
+  bullet + summary, below the 3-8 range) cross-validated by R013 catching
+  the identical gap via slop_lint's own H004. R006 (line count) and R002
+  (front-load) both use real pdfplumber geometry against the corrected
+  (post-A4b-bugfix) PDF, not an estimate. Two things confirmed by asking
+  rather than guessed, since spec 08 gives no formula: score.py's "keyword
+  density in first role" is distinct keyword hits / first role's own word
+  count, and "bullets carrying 2+ keywords" is counted across the whole
+  candidate resume's bullets (summary excluded, matching R003's own
+  explicit "including the summary" qualifier implying bullets alone don't
+  elsewhere). `tests/test_rubric.py`, 39 tests, written before
+  implementation per hard rule 7: one failing fixture per hard rule,
+  select_for_profile, score.py's weighted formula, and one full real-bank-
+  through-real-render-through-real-PDF integration test. See PROGRESS.md
+  for the full writeup, including a real renderer bug (bullet spacing)
+  found and fixed along the way during A4b's verification, before D1
+  started.)
 
-- [ ] **D2. Front-loading + line measurement from PDF geometry**
+- [x] **D2. Front-loading + line measurement from PDF geometry**
   Done: `rubric explain R002` prints real y-coordinates.
+  (Absorbed into D1's session, not built separately: R002 has no fallback
+  measurement in spec 08 at all, and R006's fallback is explicitly scoped
+  to the bank validator, not the rubric pipeline, so D1 couldn't
+  implement 11 of 13 hard rules and credibly stub the other 2. Built as
+  part of `src/jobengine/rubric/measure.py`'s `front_load()`/
+  `front_load_detail()`/`line_count_from_pdf()`, real `pdfplumber`
+  geometry against a real converted PDF. This exact DoD command was
+  re-run live at checkpoint time and passes; see D28 in
+  docs/decisions.md for the full reasoning and why this is flagged
+  explicitly rather than silently checked off.)
 
 - [ ] **D3. Patch ladder P0-P2** (deterministic only)
   Done: at least one real deficit closes with zero model calls.

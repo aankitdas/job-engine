@@ -507,16 +507,40 @@ the next real lever is a different candidate model (spec 07's list:
 `granite4:8b`, `qwen3:8b`, `mistral:7b-v0.3`), not another prompt tweak.
 
 **D27. C3 ships with qwen3.5:9b's real measured extraction quality
-(precision 0.833, recall 0.467 against the fully-reviewed 11-job
-`human_labels.yaml` fixture), which does not meet spec 07's original
-Task 2 gates (recall >= 0.85, precision >= 0.70). This is a deliberate
-decision to stop iterating and ship, not a silent miss of the DoD.**
-Recall is the failing metric (0.467 vs. 0.85); precision passes outright
-(0.833 vs. 0.70) on the reverted, named-tech-focused prompt (see D26
-addendum 3 for the full model/prompt-iteration record this decision
-follows from — two prompt variants and three real fixture-quality bugs
-were tried and measured before concluding further iteration on this axis
-has diminishing returns).
+against the fully-reviewed 11-job `human_labels.yaml` fixture, which
+does not meet spec 07's original Task 2 gates (recall >= 0.85,
+precision >= 0.70). This is a deliberate decision to stop iterating and
+ship, not a silent miss of the DoD.**
+
+**Quality is a range, not a single number, and this decision was updated
+once already to reflect that, not left citing one lucky (or unlucky)
+sample.** The shipped prompt/fixture/model combination was run 4 times
+back to back with nothing else changed, to check whether the first
+number was representative; `LocalProvider` pins `think=False` but not
+`temperature`/`seed`, so real LLM sampling variance shows up run to run:
+
+| Run | Precision | Recall |
+|---|---|---|
+| 1 | 0.833 | 0.467 |
+| 2 | 0.849 | 0.351 |
+| 3 | 0.858 | 0.431 |
+| 4 | 0.835 | 0.382 |
+| **Range** | 0.833-0.858 | 0.351-0.467 |
+| **Mean** | **0.844** | **0.408** |
+
+The variance is real but doesn't change the qualitative conclusion:
+precision clears its 0.70 gate in all 4 runs (range comfortably above
+the bar), and recall misses its 0.85 gate in all 4 runs, never within
+0.38 of it even at its best sample. `model_evals` holds all 10 real
+`keyword_extraction` runs from this session (30 rows, 3 metrics each);
+the most recent row by `run_at` is always the latest live sample of the
+actual shipped state, not a stale or rejected prompt variant, since this
+table is queried directly (`uv run python -m jobengine.eval compare`)
+rather than reconstructed from this paragraph.
+See D26 addendum 3 for the full model/prompt-iteration record this
+decision follows from — two prompt variants and three real
+fixture-quality bugs were tried and measured before concluding further
+iteration on this axis has diminishing returns.
 
 Three reasons, not one, support shipping rather than continuing to chase
 the numeric gate:
@@ -563,3 +587,83 @@ requires deliberately stopping and asking, never a default fallback;
 decision's starting position and may simply get re-confirmed. Confirmed
 by asking; this is the user's call, not inferred from a general
 "good enough" heuristic.
+
+---
+
+**D28. D1's rubric absorbed D2's scope, because R002/R006 can't be real
+hard rules without real PDF geometry.**
+TODO.md lists D2 ("Front-loading + line measurement from PDF geometry")
+as a separate build-queue item after D1 ("Rubric rules R001-R013, the
+deterministic scorer, not the patch ladder yet"). While grounding D1's
+plan against real data before writing code, it became clear this split
+doesn't actually work: R002 (front-loading) has no fallback measurement
+in spec 08 at all, and R006's (line-count) only fallback is explicitly
+scoped to "the bank validator can run without a render," not the rubric
+pipeline itself ("Use option 1 [PDF] in the pipeline"). A rubric that
+implements 11 of 13 hard rules and stubs the other 2 isn't a rubric you
+can trust, so `src/jobengine/rubric/measure.py`'s `front_load()`,
+`front_load_detail()`, and `line_count_from_pdf()` were built as part of
+D1, using real `pdfplumber` geometry against a real converted PDF, not
+placeholder logic deferred to a later session.
+
+Confirmed after the fact, not before: D2's own literal definition of
+done ("`rubric explain R002` prints real y-coordinates") was re-run live
+against real data at checkpoint time and passes today. D2 is marked done
+in TODO.md as a consequence of D1's implementation, not because a
+separate D2 session happened. Flagging this explicitly rather than
+silently checking D2's box: a future session searching for "where D2's
+work landed" should look in D1's rubric module, not expect a separate
+D2-labeled diff or session.
+
+**D28 addendum: two rubric formulas confirmed by asking, since spec 08
+gives no formula for either.** Spec 08's Score table names five weighted
+components but only spells out a method for the first (coverage) and
+implicitly the last (page penalty); "keyword density in the first role"
+(15 pts) and "bullets carrying two or more keywords" (10 pts) have no
+stated formula. Confirmed rather than guessed: density is distinct
+target-keyword stem hits (summary text included) divided by the first
+role's own word count, a true density, not a coverage ratio scoped to
+the first role. The multi-keyword-bullet fraction is computed across the
+whole candidate resume's bullets, explicitly excluding the per-role
+summary from both the numerator and denominator: R003's own rule text
+("3 to 8 bullets **including the summary**") spells out that qualifier
+exactly when it wants the summary counted as a bullet, which reads as
+this component's "bullets" meaning real bullets only when the qualifier
+is absent.
+
+**D28 addendum 2: `select_for_profile()` is a new, deliberately minimal
+candidate-resume filter, confirmed by asking, not an extension of D3's
+scope.** `render.py` had no notion of "which bullets belong to profile
+X's resume" before this session; it renders every bullet in the bank
+regardless of the bullet's own `profiles` tag. Checking real per-profile
+bullet counts during D1's grounding pass surfaced that several roles
+drop to zero bullets under a naive tag filter (e.g. `role_sei` for both
+`ai_ml_engineer` and `software_engineer`), which R003 (a hard rule) would
+then fail on trivially for every job scored against that profile. Rather
+than leave R001/R002/R003/R004/R006 untestable against anything
+realistic, `measure.select_for_profile(bank, profile)` filters each
+role's bullets to the ones already tagged for that profile and drops any
+role left with zero bullets entirely. This reuses only bank data that
+already exists (`bullet.profiles`, populated since A2); it does not rank,
+score, or choose among competing bullets, which is what makes it
+distinct from D3's patch ladder (P0 reorders, P1 swaps between
+candidates, P2 promotes) rather than a preview of it. Confirmed by
+asking before building.
+
+**D28 addendum 3: two known, deliberate scope reductions in `measure.py`,
+not oversights.** (1) `measure.stem()` is suffix-only normalization
+("case and stem normalized" per spec 08's literal text), not a real
+stemmer and not synonym-aware; grounding against real C3 extraction
+output during this session showed it correctly missing a match between
+"LLM" and "Large Language Models" (different stems, same real-world
+skill). Left as-is, matching D27's own precedent for extraction-quality
+gaps: revisit only if this recurs as a practical problem in real usage,
+not preemptively. (2) `measure.measure_typography()` (R010) checks font,
+sizes, margins, tab-stop position, and justify-alignment universally
+across every paragraph, but checks line-spacing only against the valid
+pair (1.15 header / 1.5 body), not positionally validated per exact
+section the way `render.py`'s own golden test does at construction time.
+R010's job in the rubric is catching drift in an already-rendered
+document (a bad manual edit, a future P3 rewrite), not re-proving what
+the golden test already proves at render time, so this scope reduction
+was a deliberate call, not a gap found by accident.

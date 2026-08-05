@@ -4,45 +4,30 @@
 the end via `/checkpoint`. Do not rely on memory of previous sessions.**
 
 Last updated: 2026-08-04
-Current task: C3 (keyword extraction + corpus) is **done, shipped against
-a deliberate quality decision, not against spec 07's literal numeric
-gate**. Real measured extraction quality (qwen3.5:9b, the reverted
-named-tech-focused prompt) against the fully human-reviewed 11-job
-`human_labels.yaml` fixture: **precision 0.833 (passes >= 0.70), recall
-0.467 (fails >= 0.85)**. The decision to ship anyway, not keep iterating,
-is recorded as D27 in docs/decisions.md: every resume goes through human
-review before it's sent (architecture.md stage 8, strictly before stage
-9 "apply"), recall gaps only under-extract (never invent content, the
-safe failure direction under hard rule 2), and an 11-job fixture can only
-approximate real usage. Revisit only if manual review of real pipeline
-output later shows this is a recurring practical problem, not
-preemptively; D27 lists the options in order (next candidate model, a
-deliberately-asked-about paid API call for this one stage, or accepting
-current quality) if that happens.
-Built this session: `src/jobengine/pipeline/extract.py` (the extraction
-call + job_analysis/keyword_corpus persistence, reusing C1's router
-directly per CLAUDE.md hard rule 8) and `src/jobengine/eval/{harness,
-report,tasks/keyword_extraction}.py` (spec 07's Task 2 harness, pooled
-TP/FP/FN, `uv run python -m jobengine.eval {run,compare}`). Also, along
-the way, found and fixed 3 real pre-existing data-quality bugs in the
-`human_labels.yaml` fixture from the original C2 session (see D26 in
-docs/decisions.md) and did a full exhaustive, source-quoted, human-
-reviewed re-derivation of all 11 labeled jobs' `required_keywords`, now
-the cleanest ground truth this project has had.
-Next: your call between C4 (relevance pre-filter, spec 06, the other
-half of spec 07's eval harness, Task 1), B3-followup, or A4b.
+Current task: D1 (rubric rules R001-R013) is **done**, and so is D2
+(front-loading + line measurement from PDF geometry) as a direct
+consequence of D1's implementation, not a separately-run session; see D28
+in docs/decisions.md for why the two collapsed into one. A4b (PDF
+conversion) is also done, closed at the start of this same session before
+D1 started (TODO.md's own rule 1 requires Phase A fully green before
+Phase D). `src/jobengine/rubric/{measure,rules,score}.py` plus a CLI
+(`uv run python -m jobengine.rubric {score,explain}`) implement all 13
+hard rules and the weighted score, grounded against real data both before
+coding (live C3 extraction against 3 real JDs) and after (a real
+`job_analysis` row persisted to a scratch db copy, then the actual CLI run
+against it end to end, never the real `data/jobengine.db`). Full suite
+240/240, ruff clean. `patch.py` (the P0-P4 ladder) is explicitly not
+built; that's D3.
+Next: D3 (patch ladder P0-P2, deterministic only) is next in TODO.md's
+order, but per the session protocol this needs your go-ahead before
+starting, not just being next in the list.
 
-Separately: B2's unattended-overnight proof is now **resolved**. Windows
-Task Scheduler task `job-engine-sync` fired on its own twice on 2026-08-03
-(`runs` ids 9 and 10, `started_at` 04:13:50Z and 14:02:54Z, both with real
-non-zero diffs: id 9 `new=2 edited=53 closed=2`, id 10 `new=10 edited=1
-closed=9`), cross-referenced against Task Scheduler's own Last Run Time by
-the user. Real diffs (not just a re-run of unchanged data) are themselves
-corroborating: a manual debug re-run minutes apart, like ids 6-8 the
-previous day, showed zero drift, while these two show genuine new/edited/
-closed content, consistent with independent scheduled fetches rather than
-a human retriggering the same run. See Known Issues, this item is marked
-resolved there, not deleted, so the reasoning stays visible.
+Separately: B2's unattended-overnight proof remains resolved (see Known
+Issues, unchanged this session). `data/jobengine.db` continues accumulating
+real state on its own via the Windows Task Scheduler job: `jobs` grew from
+3846 to 3882 and `runs` from 10 to 12 between the last checkpoint and this
+one, both consistent with genuine unattended scheduled fetches, not manual
+runs.
 
 **Read this before touching `data/jobengine.db`:** hard rule 13 in
 CLAUDE.md (added 2026-08-02, see D22 in docs/decisions.md) requires asking
@@ -62,7 +47,7 @@ project's own B1/B2 sessions) treated that file.
 | A2 | Bullet bank | done | |
 | A3 | Slop linter | done | |
 | A4 | Docx renderer + golden typography test | done | see note below, PDF/watermark split out |
-| A4b | PDF conversion (LibreOffice headless) | not started | blocks D2 |
+| A4b | PDF conversion (LibreOffice headless) | done | `resume/pdf.py`, verified live against real `soffice` on 2 distinct real full-bank renders; found+fixed a real bullet-spacing bug along the way |
 | A4c | Watermarking (speculative preview) | not started | no urgency, no speculative bullets exist yet |
 | B1 | ATS clients + registry | done | clients+registry only, sync.py's fetch/diff loop is B2 |
 | B2 | Fetch and diff | done | scheduled and confirmed firing unattended on its own on 2026-08-03; see Known Issues, item resolved |
@@ -71,11 +56,11 @@ project's own B1/B2 sessions) treated that file.
 | B3-followup | Calibrate daily filter-survivor cap | not started | deliberately deferred, see D23 in docs/decisions.md |
 | C1 | LLM router | done | `llm.check` verified live against real Ollama, all 3 stages reachable, exit 0; cold-start ~15s / steady-state 600-935ms, see Known Issues |
 | C2 | Eval fixtures | done | 50/50 JDs labelled, loaded into `human_labels` (150 rows); 11/15 keyword-annotated, short of TODO.md's literal target, done anyway per explicit sign-off, see Known Issues |
-| C3 | Keyword extraction | done | shipped per D27 (ship decision), not literal DoD: precision 0.833 passes, recall 0.467 fails the 0.85 gate, see Known Issues |
+| C3 | Keyword extraction | done | shipped per D27 (ship decision), not literal DoD: precision 0.83-0.86 passes, recall 0.35-0.47 fails the 0.85 gate (range across 4 live runs), see Known Issues |
 | C4 | Relevance filter | not started | |
-| D1 | Rubric rules | not started | |
-| D2 | PDF geometry | not started | |
-| D3 | Patch P0-P2 | not started | |
+| D1 | Rubric rules | done | all 13 hard rules + weighted score, `rubric/{measure,rules,score}.py` + CLI, grounded against 3 real JDs |
+| D2 | PDF geometry | done | absorbed into D1 (R002/R006 have no fallback), `rubric explain R002` re-verified live with real y-coordinates; see D28 |
+| D3 | Patch P0-P2 | not started | next per TODO.md order, needs go-ahead |
 | D4 | Patch P3 | not started | |
 | E1 | Profile brief | not started | |
 | E2 | Base resumes | not started | human-in-loop |
@@ -95,572 +80,142 @@ Status values: `not started` | `in progress` | `blocked` | `done`
 
 ## What exists right now
 
-- `src/jobengine/db/schema.sql`: full DDL for all 16 tables in
-  specs/00-data-model.md plus indexes and immutability/append-only triggers.
-- `src/jobengine/db/migrate.py`: `connect()` (opens the sqlite3 connection,
-  turns on `PRAGMA foreign_keys`), `init()` (idempotent schema apply),
-  `migrate()` (applies schema + records `schema_migrations`), `stats()`
-  (row counts per table).
-- `src/jobengine/db/models.py`: pydantic models `Company`, `Job`, `Outcome`,
-  and typed accessors `upsert_company`, `upsert_job`, `get_company`,
-  `get_job`, `insert_outcome`. No accessors yet for the other 13 tables;
-  those get added when the phase that needs them lands (B1 for companies
-  detail, D-phase for rubric/variant tables, etc.).
-- `src/jobengine/db/__main__.py`: `uv run python -m jobengine.db {init,migrate,stats}`.
-- `tests/test_db.py`: 8 tests, including the required first_seen_at
-  immutability test for jobs and (per explicit request) the matching one
-  for companies, plus the outcomes append-only constraint.
-- `src/jobengine/resume/bank.py`: pydantic models (`Bank`, `Role`, `Bullet`,
-  `SummaryBullet`, `Education`, `Certificate`, `Publication`, `Meta`),
-  `load_bank()`, `validate_bank()` (rules 1, 2, 4, 5, 6, 8, 9 as hard errors,
-  plus a `requires_degree_profiles`/`title`/`profiles` referential-integrity
-  check against `KNOWN_PROFILES`; rules 3 and 7 as warnings that don't fail
-  `validate`), `coverage_gaps()` (rule 10, checked against the
-  `keyword_corpus` table, not per-bullet text), `keyword_counts()`, and the
-  CLI (`uv run python -m jobengine.resume.bank
-  {validate,stats --by-keyword,coverage --profile}`). `Role.company`,
-  `.location`, and `.start` are optional, since Lee's rule is that
-  `kind: project` entries skip dates and location entirely.
-- `resume/bank/aankit.yaml`: the real seeded bank. 2 education entries, 7
-  roles (Bantrly, UTD Machine Learning Researcher, SEI Investments,
-  Nebraska-Lincoln, Jadavpur University, plus 2 `kind: project` entries for
-  the Bantrly Lesson Generator and Document Intelligence Platform projects),
-  28 bullets total, 4 publications. `bank validate` passes 0 errors, 0
-  warnings. Per-profile bullet counts: ai_ml_engineer 24, data_scientist 17,
-  software_engineer 14.
-- `tests/test_bank.py`: 24 tests, one failing fixture per rule plus
-  id-uniqueness, profile-referential-integrity, project-role-optional-fields,
-  and coverage-gap cases. `bank.py`'s past-tense heuristic is now public
-  (`is_past_tense`, `IRREGULAR_PAST_TENSE_VERBS`) so slop_lint's H003 reuses
-  it exactly instead of a second copy.
-- `src/jobengine/resume/slop_lint.py`: a lenient pydantic mirror of bank.py's
-  Bank/Role/Bullet shape (`LintSummary`, `LintBullet`, `LintRole`,
-  `LintTarget`, all fields optional/defaulted) so a structural problem
-  (missing summary, dangling id) comes back as a lint `Issue` instead of a
-  `ValidationError` with no rule code. `Report` has three buckets
-  (`errors`, `warnings`, `fatal`) plus `.ok`. `lint_target()` is the core
-  in-memory check; `lint_path()` loads a target YAML plus a ground-truth
-  bank YAML (`bank_path`, default `DEFAULT_BANK_PATH`) for H008's id
-  cross-reference. Implements all 17 rules from specs/02 (S001-S006,
-  H001-H008, W001-W003) plus the E999 fatal hard block on `speculative`
-  bullets outside `--preview`. CLI: `uv run python -m
-  jobengine.resume.slop_lint {<path>|--changed} [--preview] [--json]
-  [--strict] [--profile]`.
-- `tests/test_slop_lint.py`: 22 tests, one failing fixture per rule
-  (H008 covered twice: an isolated in-memory check and an end-to-end one
-  through the real YAML loader with a genuinely dangling id against a small
-  fixture bank), plus two clean-pass tests (a synthetic target and the real
-  `role_bantrly` role from `resume/bank/aankit.yaml`, so that test doubles
-  as a bank regression check).
-- `.claude/settings.json`: new, checked in (unlike `settings.local.json`,
-  which is gitignored). Wires `PostToolUse` on `Edit|Write` to `uv run
-  python -m jobengine.resume.slop_lint --changed`. See D6's addendum in
-  docs/decisions.md for the exit-code contract.
-- `src/jobengine/resume/render.py`: **A4 only, not spec 03's full scope.**
-  Built: `Identity` (`load_identity()` reads `identity.toml`, read-only,
-  never written to), `RenderProfile` (a stand-in for E1's not-yet-built
-  profile registry, `section_order` + `include_summary`/`summary_text`),
-  and `render(bank, identity, profile) -> Document`, an in-memory
-  python-docx `Document`. Every run/paragraph gets explicit direct
-  formatting from a `_TYPOGRAPHY` table (no Word paragraph styles, no
-  inherited defaults) covering all 7 typography rows in spec 03's table,
-  the single 7.5in right tab stop, 720-twip margins, left not justified,
-  profile-driven section order, the summary-section trigger, "to Present"
-  for current roles, no date line for `kind: project` roles, and
-  publication author-run bolding. `_add_right_tab_paragraph()` is the one
-  shared mechanism for every line that needs text pinned to the 7.5in right
-  margin (job title/date, education degree/status); both go through it, so
-  there's exactly one implementation of "right-aligned via a tab stop" to
-  get right, not two. `Education.status` is a literal opaque string
-  `render()` just prints, never date-computed (no "3-year rule" logic
-  anywhere in this module; that's the bank content's call, see D5's
-  addendum in docs/decisions.md). The contact line's LinkedIn/GitHub/
-  Portfolio/Scholar are real docx hyperlink relationships (short label
-  text, e.g. "LinkedIn", never the raw URL as visible text), built via
-  `_add_hyperlink_run()`: python-docx has no high-level write API for
-  hyperlinks, so this adds the run normally through the same
-  `_set_run_style()` everything else uses, then moves its `<w:r>` element
-  inside a `<w:hyperlink r:id="...">` pointing at a relationship added via
-  `part.relate_to()`. Phone and email stay plain black text, matching the
-  template. **Not built**: PDF conversion (A4b) and
-  speculative-bullet watermarking (A4c), both real sections of spec 03,
-  tracked as separate TODO.md items rather than silently folded into "A4
-  done." `render()` never opens or writes `resume/templates/golden.docx`;
-  every document is built fresh via `docx.Document()`, so rule 6 (never
-  mutate the template) holds by construction.
-- `tests/test_render.py`: 24 tests. Typography per semantic role checked
-  against `_EXPECTED`, a table hand-transcribed from spec 03's own
-  typography table plus raw XML pulled directly from
-  `docs/headless-headhunter/template.docx` (confirmed byte-identical to
-  `resume/templates/golden.docx`), independent of `render.py` and never
-  generated by calling `render()` itself, specifically to avoid a
-  circular golden test. No physical `tests/fixtures/golden.docx` fixture
-  exists; that's a deliberate deviation from spec 03's literal wording,
-  confirmed by asking. Structural rules (section order, summary trigger,
-  project no-dates, current-role "to Present", template immutability)
-  covered on a small synthetic bank; one dedicated test renders the real
-  `resume/bank/aankit.yaml` end to end for the literal golden-test DoD.
-  `test_education_date_uses_tab_stop_not_hardcoded_spaces` uses a
-  deliberately long degree/field/institution string to catch a real bug an
-  XML review caught post-hoc: the education line originally right-aligned
-  its status via hardcoded spaces, not a tab stop, so long degree text
-  wrapped unpredictably instead of staying pinned to the margin. Fixed by
-  routing education through the same `_add_right_tab_paragraph()` helper
-  the job-title/date line already used correctly. A second real spec 03
-  gap found the same way (XML review, not a failing test): the contact
-  line printed raw URLs as plain visible text instead of short hyperlinked
-  labels, contradicting both the typography note ("phone, email, and link
-  runs which may be blue") and the template's own example (short labels,
-  not full URLs). `test_contact_line_links_are_real_hyperlinks_not_url_text`,
-  `test_contact_line_phone_and_email_are_plain_text_not_links`,
-  `test_contact_hyperlink_runs_are_blue_underlined_arial_12pt`, and
-  `test_no_raw_url_text_anywhere_in_document` cover it, on both the
-  synthetic bank and the real-bank golden test.
-- `scripts/render_sample.py`: manual dry-run, calls `render()` against the
-  real bank/identity/default profile (same input as the golden test) and
-  writes to `resume/rendered/preview/sample.docx` for visual inspection in
-  Word. This is the only way to actually eyeball the output right now;
-  spec 03's own DoD ("opening the output in Word side by side with the
-  user's template shows no visible difference except the three deliberate
-  fixes") is a manual check nothing in this repo can run for you.
+One line per module, verified against the actual filesystem and test
+suite at this checkpoint, not carried forward from memory. Full history
+and the reasoning behind non-obvious choices lives in the Session log
+below and docs/decisions.md; this section is current state only.
 
-- `src/jobengine/sources/models.py`: `JobPosting`, the normalized pydantic
-  model both ATS clients return. Not yet mapped onto the `jobs` table;
-  that mapping (plus `content_hash` computation and the diff loop) is B2.
-- `src/jobengine/sources/_client.py`: shared `httpx.AsyncClient` factory
-  (20s timeout, descriptive User-Agent), a process-wide
-  `asyncio.Semaphore(10)` concurrency cap, and `retryable()`, a `tenacity`
-  decorator (3 attempts, exponential backoff, retries only on 5xx/timeout,
-  reraises immediately on anything else including 404) shared by both
-  clients so the retry policy is defined once.
-- `src/jobengine/sources/greenhouse.py` and `ashby.py`: each exposes
-  `async fetch_board(slug, *, transport=None) -> list[JobPosting]`. The
-  `transport` kwarg exists solely so tests can inject `httpx.MockTransport`
-  without a real network call. Greenhouse strips tags before unescaping
-  HTML entities, not the other way around, an ordering bug the tests caught
-  immediately (unescaping first turns an escaped `&lt;fast&gt;` into a
-  literal `<fast>` that the tag-stripping regex then eats as if it were a
-  real tag). Ashby filters out `isListed: false` postings and uses the
-  posting's `id` field for `ats_job_id`, which spec 04's Ashby field list
-  omits but the real API returns; confirmed by asking before assuming.
-- `src/jobengine/sources/registry.py`: `seed()`, `add()`, `validate()`, plus
-  a self-hosted CLI (`uv run python -m jobengine.sources.registry
-  {seed,add,validate}`). `seed`/`add` both go through
-  `_insert_new_company()`, an `INSERT OR IGNORE`, deliberately not
-  `jobengine.db.models.upsert_company`: that helper's `ON CONFLICT DO
-  UPDATE` unconditionally overwrites `status`, so re-running `seed` against
-  an already-`active` company would silently reset it back to
-  `unverified`, destroying validation history. `validate()` buckets each
-  probe into `active_ok` / `active_zero` / `dead` / `retry` per spec 04's
-  four cases and takes an optional `fetchers` dict so tests can inject fake
-  async fetchers instead of mocking HTTP transport for status-transition
-  logic. A company that 404s does not flip to `dead` until the 3rd
-  consecutive failure; below that threshold its status is left exactly as
-  it was (spec 04 only specifies the status change at the threshold).
-- `config/seed_companies.yaml`: 15 real companies (Stripe, Airbnb,
-  DoorDash, Pinterest, Discord, Robinhood, Figma, Brex, Notion, Ramp,
-  Linear, Anthropic, OpenAI, Scale AI, Cohere), not just test fixtures.
-  Verified against the live Greenhouse/Ashby APIs during this session
-  (`registry seed` + `registry validate` against a scratch db, not just
-  mocked tests): 14 of 15 resolved on the first guess, `doordash` 404'd and
-  turned out to be `doordashusa`, fixed in the file itself. This is a small
-  starter set, not the real 150-300 list spec 04 calls for; expand by hand.
-- `src/jobengine/sources/sync.py`: `sync(conn, dry_run=False, fetchers=None)
-  -> RunSummary`, the fetch-and-diff loop from spec 04. Iterates
-  `companies.status='active'` (via new `list_active_companies()` in
-  `db/models.py`), fetches each board through B1's clients, and for every
-  posting: looks up the existing row's `content_hash` via `get_job()`
-  first (needed to detect edits before it's overwritten), maps
-  `JobPosting` to `db.models.Job` (`content_hash = sha256(description_plain
-  or "")`), and calls `upsert_job()` with `first_seen_at=now()`
-  unconditionally on every call, new or existing. That's safe only because
-  `upsert_job`'s `ON CONFLICT DO UPDATE` already omits `first_seen_at` from
-  its SET list (built in A1); `sync.py` adds no new immutability logic of
-  its own, it just relies on what's already there. A changed
-  `content_hash` on an existing row is `logging.info()`'d and counted in
-  `edited`, not written as a new table row (confirmed by asking, no
-  edit-log table exists in the 16-table schema; see docs/decisions.md D2's
-  addendum). Per-company fetch failures (dead slug, exhausted retries) are
-  caught, logged, and skip only that company; one bad board never aborts
-  the run, and a failed company's existing jobs are left untouched by the
-  close-missing-jobs step since we never got a valid response to diff
-  against. `--dry-run` is not a second code path: the full diff always
-  runs and always writes, `dry_run` only decides `conn.commit()` vs.
-  `conn.rollback()` at the very end, so there is exactly one implementation
-  of the diff logic. One free, non-obvious side effect worth knowing about:
-  because every posting still present in a fetch gets `closed_at=None`
-  explicitly, and `upsert_job`'s SET clause already includes `closed_at =
-  excluded.closed_at`, a job that closes on one sync and reappears on a
-  later one automatically un-closes with no special-case code; this falls
-  directly out of the existing upsert, `sync.py` doesn't add reopen logic.
-  Every `sync()` call writes exactly one row to the new `runs` table
-  (`stage='sync'`, `counts` JSON of new/updated/edited/closed/
-  companies_ok/companies_failed, `errors` JSON list of per-company
-  failure strings) via a new `record_run()` accessor, before the
-  commit/rollback decision, so a dry run's `runs` row is rolled back too.
-  CLI: `uv run python -m jobengine.sources.sync [--dry-run]`.
-- `db/models.py` gained three accessors for B2: `list_active_companies()`,
-  `record_run()` (new `Run` pydantic model), and `close_missing_jobs()`.
-  **`close_missing_jobs` diffs id sets in Python and issues one `UPDATE`
-  per missing job via `executemany`, not a single batched `WHERE
-  ats_job_id NOT IN (...)` query.** Deliberate: a single `IN`/`NOT IN`
-  clause risks SQLite's per-statement bound-parameter ceiling on a large
-  board (Ashby's real OpenAI listing was 752 postings during this
-  session's live check, comfortably within most limits today but not a
-  bet worth making as boards grow), and chunking that clause into safe
-  batches would be more code than just diffing two Python sets and looping
-  the updates. Only ever iterates over what's actually missing (typically
-  a handful of closed postings per company per run), so the loop is cheap
-  in practice.
-- `companies.source` CHECK constraint widened from `('seed', 'harvest')` to
-  `('seed', 'harvest', 'manual')` in `schema.sql`, plus the matching column
-  note in specs/00-data-model.md, so `registry add`'s manually-registered
-  companies get their own source value instead of being folded into
-  `seed`. `data/jobengine.db` had zero rows in `companies`/`jobs` at the
-  time (verified before touching it), so this was a drop-and-`db init`,
-  not a real migration; no `schema_migrations` bump needed since there was
-  no data to migrate.
-- `scripts/sync.sh`: bash wrapper for the cron/Task Scheduler entry spec 04
-  calls for ("Scheduling"). `cd`s into the repo via `${BASH_SOURCE[0]}`
-  (works regardless of caller's cwd, verified by running it from `/tmp`),
-  prepends `~/.local/bin` to `PATH` and sources `.venv/bin/activate` since
-  a cron/Task Scheduler environment often lacks both, then runs `uv run
-  python -m jobengine.sources.sync`, appending timestamped stdout/stderr to
-  `data/logs/sync-YYYY-MM-DD.log`. `chmod +x`'d. Now actually invoked by
-  Windows Task Scheduler task `job-engine-sync` (created via `schtasks
-  /create`, points at `C:\Users\aanki\run-sync.bat` with no inline
-  arguments, every 3h from 6am local); see Known Issues for what's still
-  unverified about that.
-- **`data/jobengine.db` currently holds real accumulated state: 15
-  companies, 3834 jobs, 8 `runs` rows, 0 `applications`** (re-verified
-  read-only this checkpoint via plain `SELECT COUNT(*)` on all four
-  tables; unchanged from the last checkpoint, so no new activity happened
-  between the two). Not modified this session, per the hard rule below.
-  Grew for real since: see the unattended-firing resolution in Known
-  Issues, `runs` is now 10 rows and `jobs` is now 3846 (was 3834), both
-  from genuine scheduled fetches, not manual re-runs.
-- `config/filters.yaml`: B3's filter/routing config, now covering all five
-  hard/per-profile checks. Per-profile `title_aliases` (grounded against
-  real title distributions, not just docs/architecture.md's placeholder
-  table: bare "engineer"/"scientist"/"researcher" added on top of the
-  spec's original phrase-only aliases), matching `exclusion_keywords`/
-  `exclusion_override_keywords` on all three profiles now, not just
-  `software_engineer` (added `ai_ml_engineer`'s and `data_scientist`'s
-  after a visual sample caught "User Researcher, AI Evaluations" and
-  "People Research Scientist, Recruiting" slipping through bare
-  "researcher"/"scientist"; "success engineer"/"customer engineer" added
-  to `software_engineer`'s list after the same sample caught "AI Success
-  Engineer"), a new `seniority.exclude_title_keywords` (cross-profile hard
-  exclude, no override list, added after the same sample caught a
-  Pinterest "Manager II" title), `location.remote_synonyms` plus new
-  `us_informal_city_abbreviations`/`us_major_city_names`/`non_us_signals`
-  (backing `is_us_location`, see below), `citizenship_clearance.
-  exclude_phrases` (hard exclude across all profiles), and
-  `employment_type` (Ashby's structured `raw_json.employmentType` field
-  plus a Greenhouse title-text fallback). `daily_cap: null`, a deliberate
-  non-target placeholder, not a tuned number; see D23 in docs/decisions.md
-  and its 3 addenda.
-  **`non_us_signals`' "apac"/"greater china"/"southern europe" entries are
-  unverified against real data, not confirmed-working**: added on
-  explicit request, but no job in the current 3846-job dataset contains
-  any of the three (checked directly), so nothing exercises that code path
-  today. Harmless if wrong (worst case, a job with one of these in
-  `location_raw` gets classified `ambiguous_unparseable` instead of
-  `non_us_match`, still excluded either way, just logged differently), but
-  flagging so "in the config" isn't mistaken for "proven correct."
-- `src/jobengine/pipeline/filter.py`: `load_filter_config()`,
-  `matches_profiles(job, config) -> list[str]`, `is_remote()`,
-  `is_excluded_employment_type()`, `is_already_applied(conn, job_id)`,
-  `is_citizenship_or_clearance_required(description, config)`,
-  `is_above_target_seniority(title, config)`, `is_us_location(job,
-  config)`, and `classify_location(job, config) -> str` (returns
-  `"remote"`/`"us_match"`/`"non_us_match"`/`"empty_location"`/
-  `"ambiguous_unparseable"`; `is_us_location` is just `classify_location(..)
-  in ("remote", "us_match")`, kept separate so callers can log the
-  ambiguous/empty cases instead of only getting a bare bool). All pure
-  functions, nothing persisted: no filter-survivor table exists or is
-  written to (`job_analysis`'s other columns belong to C3/D1); downstream
-  stages call these live. One shared `_phrase_matches()` helper used by
-  every check (word-boundary match for single-word phrases so "engineer"
-  doesn't match inside "engineering", plain substring for multi-word
-  phrases). `US_STATE_ABBREVIATIONS`/`US_STATE_FULL_NAMES` are hardcoded
-  Python constants (not YAML), matching the `_TECH_JARGON_TERMS`/
-  `IRREGULAR_PAST_TENSE_VERBS` precedent in `slop_lint.py`/`bank.py`: a
-  fixed 50-state geography list isn't a tunable threshold. `DE` (Delaware)
-  is deliberately left out of the state-code set; see D23 addendum 3.
-- `tests/test_filter.py`: 40 tests (grew from 23 across two rounds, all
-  written before their matching implementation per hard rule 7, all
-  passed on the first real implementation attempt once written). Covers
-  every function above, including the seniority word-boundary guarantee
-  ("Senior"/"Staff" titles explicitly confirmed NOT excluded) and
-  `is_us_location`'s remote-short-circuit, comma-gated state-code
-  matching, bare-city-name matching, and the empty/garbage-location
-  logging path (`classify_location(...) == "ambiguous_unparseable"`
-  asserted directly, not just the bool).
-- **Final signed-off match-rate numbers against the real db** (3836 jobs
-  at signoff time; ai_ml_engineer/software_engineer/data_scientist):
-  post-alias-match 83/963/90 (1057 total); minus employment (6), minus
-  citizenship (16), minus seniority (18), minus non-US location (158,
-  down from an initial 345 before the location-allowlist gap fix) =
-  **final 68/776/81 (859 total)**. Verified via 4-set inclusion-exclusion
-  on the restricted intersections (`|A∩E|=6, |A∩C|=16, |A∩S|=18,
-  |A∩L|=163`): union size 198 both by direct set computation and by the
-  signed inclusion-exclusion sum, `1057 - 198 = 859`, matching the
-  sequential stage-by-stage result exactly. Two real gaps were caught and
-  fixed by checking actual output against real data mid-session, not
-  found by the tests: a 205-job hole in the location allowlist (bare
-  "San Francisco" alone, no state suffix, was 148 of those jobs) found by
-  inspecting what the `"ambiguous_unparseable"` bucket actually contained
-  instead of trusting the design, and the ai_ml_engineer/data_scientist
-  exclusion-keyword profile mismatch described above. This remains a
-  snapshot of what fraction of the current ~15-company stock matches the
-  filter logic, not a daily-volume figure (D23 still applies).
-- `src/jobengine/sources/greenhouse.py`'s `_strip_html`: rewritten from a
-  regex tag-strip to an `html.parser`-based extractor, fixing a real bug
-  found while building C2's fixture excerpts (not something this session
-  went looking for): every Greenhouse job's `content` field is double-HTML-
-  escaped in practice (`&lt;h2&gt;...&lt;/h2&gt;`, no literal tag anywhere),
-  and the old code's tag-strip-then-unescape order left that markup
-  completely unstripped in `jobs.description`. The new `_strip_html` feeds
-  the raw string to an `HTMLParser` subclass that tracks whether it saw a
-  genuine tag; if it did (matches the older, purely synthetic "real tag
-  plus a separately-escaped literal-text mention" test case), it trusts
-  that pass; if it didn't (matches 100% of real Greenhouse data, verified
-  directly across all 2,691 jobs), it unescapes once and re-parses,
-  correctly revealing and stripping the real markup. No new dependency.
-  See the code comment above `_strip_html` for the one known limitation
-  (the found-tag heuristic assumes a field is never a genuine mix of both
-  patterns; true for 100% of real data checked, not a logical guarantee)
-  and D22/D23's addendum in docs/decisions.md for the full writeup. 2 new
-  tests added (double-escaped real markup, plain-text passthrough); the
-  original synthetic test still passes unchanged.
-- **All 2,691 existing Greenhouse rows in `data/jobengine.db` were
-  backfilled** with the corrected `description` (recomputed from
-  `raw_json`'s original `content`, not from the already-polluted stored
-  value) and a matching recomputed `content_hash`. Explicit hard-rule-13
-  exception granted and recorded (D22/D23 addendum): scoped to exactly
-  those two columns, `first_seen_at`/`last_seen_at`/`closed_at`/`raw_json`
-  never in the `UPDATE`'s column list. Verified after running via a full
-  before/after snapshot of every column on all 3,846 rows that existed at
-  the time, not a sample: exactly 2,691 changed, all `ats='greenhouse'`,
-  zero `ats='ashby'` rows touched, zero columns other than the two
-  intended ones changed anywhere.
-- `src/jobengine/eval/` (new package, `fixtures.py` only so far;
-  `harness.py`/`tasks/`/`report.py` from spec 07's module layout are not
-  built, that's C1/C3/C4's work, not C2's): `load_human_labels(conn, path)
-  -> int`, a pure loader with no scorer/extractor/comparison logic.
-  `required_keywords` is one flat list per job in the YAML but
-  `human_labels` is keyed `(job_id, profile)` like the rest of this schema
-  (`job_analysis`, `keyword_corpus`), so the loader attaches the keyword
-  list only to whichever profile(s) have that job's highest relevance
-  score, not to every profile a job merely scored above zero on. Upserts
-  on the `(job_id, profile)` primary key, so re-running as the fixture
-  gets filled in over multiple sittings updates in place rather than
-  erroring or duplicating; verified directly, not just by test, running
-  the loader twice against the real filled-in file left `human_labels` at
-  150 rows both times.
-- `tests/fixtures/eval/human_labels.yaml`: the real C2 fixture, 50 real
-  JDs. Regenerated once mid-session to swap `description_excerpt` (an
-  800-char truncation) for the full JD text under a plain `description`
-  field, matched and merged by `job_id` so the 7 labels already filled in
-  at that point survived the regeneration (verified programmatically, not
-  eyeballed). **Now fully labelled**: all 50 have non-null relevance
-  scores for all three profiles, 11 of the 50 have hand-extracted
-  `required_keywords` (short of the spec's "~15" target, see Known
-  Issues), loaded into the real `human_labels` table, 150 rows. A
-  completeness check caught 3 real data-entry typos ("90S"/"0S"/"70S",
-  string not int, all on `ai_ml_engineer`, all three consecutive job_ids)
-  before they could reach the loader; fixed by hand after the user
-  confirmed the intended values.
-- `tests/test_eval_fixtures.py`: 6 tests, written before implementation
-  per hard rule 7's spirit, all passed on the first real implementation
-  attempt (one test-fixture FK issue along the way, the same
-  `companies`/`jobs`-seeding gap `test_filter.py` hit earlier, fixed in
-  the fixture not the loader). Covers: a filled profile writes correctly,
-  an all-null job is skipped entirely (never written as a junk row), null
-  `required_keywords` doesn't break anything, keywords attach only to the
-  max-relevance profile, a re-run with revised scores updates in place
-  rather than duplicating, and a mixed batch only counts labelled
-  profiles. Deliberately uses small hand-written YAML fixtures, not the
-  real 50-job file, so these test the loader's logic directly rather than
-  depending on how much of the real file happens to be labelled at any
-  given time.
+**db/** (`src/jobengine/db/`): `schema.sql` (16 tables + indexes +
+immutability triggers), `migrate.py` (`connect`/`init`/`migrate`/`stats`),
+`models.py` (pydantic models + typed accessors for `companies`, `jobs`,
+`outcomes`, `runs`, `job_analysis`, `keyword_corpus`, `model_evals`;
+`get_job_analysis()` added this session), `__main__.py` (`uv run python -m
+jobengine.db {init,migrate,stats}`). `tests/test_db.py`: 8 tests.
 
-- `src/jobengine/llm/` (new package, C1): `schemas.py` (`LocalConfig`,
-  `RoutingConfig`, `FallbackConfig`, `ApiConfig`, `LLMConfig` pydantic
-  models mirroring `config/llm.toml`'s shape, plus `LLMCallResult`, the
-  per-call accounting envelope: stage, provider, model, input/output
-  tokens, duration_ms, cost_usd, output. This module writes to no table;
-  the envelope is returned to whichever stage calls it, and C3/C4 persist
-  whichever fields their own table has columns for, per
-  specs/00-data-model.md's `job_analysis`/`relevance_scores` column
-  lists), `providers/local.py` (`LocalProvider`, wraps
-  `ollama.AsyncClient`; `call()` always passes `think=False` and
-  `format=schema.model_json_schema()` explicitly on every request, one
-  call site, no Modelfile default relied on; accepts an injectable
-  `client` kwarg so tests never hit a real network, same DI pattern
-  `sources/greenhouse.py` already uses for `httpx.MockTransport`),
-  `providers/anthropic.py` (`AnthropicProvider`, guard-only, see D25 in
-  docs/decisions.md: constructor requires an explicit `api_key`, never
-  reads `os.environ`, and `call()` always raises `NotImplementedError`,
-  since no stage in spec 05's routing table uses it), `router.py`
-  (`load_config()` reads `config/llm.toml` via `tomllib` matching
-  `render.py`'s `identity.toml` precedent, expanding `${OLLAMA_BASE_URL}`
-  by hand and raising a clear `RuntimeError` if unset rather than
-  computing a fallback; `get_provider()` is the billing guard's second,
-  independent layer, refusing `"api"`-tier construction unless
-  `config.llm.api.enabled` and an explicit `api_key` were both given to
-  that call; `call()` applies the configured fallback (`skip`/`fail`)
-  only around a constructed provider's `.call()`, never around
-  `get_provider()` itself, so a refused Anthropic construction always
-  raises regardless of the stage's fallback setting), and `check.py`
-  (`uv run python -m jobengine.llm.check`, per-stage provider/
-  reachability/latency, exits non-zero if any stage's provider would
-  resolve to a constructed `AnthropicProvider` under the loaded config).
-  All of `router.py`/`providers/*.py`'s public calls are `async def`
-  (matching `sources/greenhouse.py`/`ashby.py`'s precedent for I/O-bound
-  leaf functions meant to be awaited by a caller or driven via
-  `asyncio.run()` in tests, not `sources/sync.py`'s pattern of a sync
-  top-level function wrapping `asyncio.run()` internally; `check.py`'s
-  `main()` is the one place that wraps with `asyncio.run()`, since it's
-  the actual CLI entry point). No new dependency: `ollama` was already in
-  `pyproject.toml`, unused until this session.
-- `config/llm.toml`: new, mirrors spec 05's TOML block exactly
-  (`[llm.local]`, `[llm.routing]`, `[llm.fallback]`) plus a `[llm.api]
-  enabled = false` section spec 05's example block doesn't show but the
-  billing guard needs something to check; no API key in this file, ever.
-- `tests/test_llm_local_provider.py` (7 tests): `think=False` present on
-  every call, `format=` carries the schema's JSON schema, `options.num_ctx`
-  matches the configured context window, and the returned envelope has
-  `cost_usd == 0.0` with real token counts from the (faked) response.
-- `tests/test_llm_router.py` (13 tests): `load_config()`'s env-var
-  expansion and its clear-error-on-missing-var path (against a real
-  written-to-`tmp_path` `llm.toml`, not just in-memory config objects);
-  `get_provider()`'s guard in all four combinations (local tier always
-  works; api tier refused when disabled; api tier refused when enabled but
-  no key passed; api tier constructs only with both); a dedicated test
-  that sets a real `ANTHROPIC_API_KEY` env var and confirms construction
-  is still refused, the literal "nearly impossible to trigger by
-  accident" property from CLAUDE.md hard rule 9; `call()`'s skip/fail
-  fallback behavior; and that a billing-guard `RuntimeError` from
-  `get_provider()` is never swallowed by a stage's `"skip"` fallback.
-- `tests/test_llm_check.py` (6 tests): exercises `_check_stage`/`_run`
-  directly with a monkeypatched `get_provider`, not a real Ollama server,
-  covering refused/reachable/unreachable per-stage outcomes and the
-  overall exit-code assertion (0 when no stage would construct
-  `AnthropicProvider`, 1 when one would, including the defensive case
-  where `get_provider` is monkeypatched to return one despite the default
-  config, since that should never happen in practice but `check.py` must
-  still catch it if it ever did).
-- **`uv run python -m jobengine.llm.check` verified live**, by the user,
-  against the real WSL2/Windows Ollama setup: all three stages
-  (`relevance`/`extract`/`rephrase`) reachable, exit code 0. Cold-start
-  latency 14,945ms on the first call after Ollama loads the model into
-  memory, steady-state 600-935ms on repeat calls after that, confirmed by
-  3 consecutive clean runs with no per-stage anomaly. See Known Issues for
-  why the cold-start number is expected, not a regression signal.
+**resume/** (`src/jobengine/resume/`): `bank.py` (pydantic bank schema,
+`load_bank()`, `validate_bank()`, `coverage_gaps()`, `keyword_counts()`,
+`is_past_tense()` public for reuse, CLI `uv run python -m
+jobengine.resume.bank {validate,stats,coverage}`); `slop_lint.py` (17
+rules from specs/02, `lint_target()`/`lint_path()`, CLI, wired into
+`.claude/settings.json`'s PostToolUse hook); `render.py` (`render(bank,
+identity, profile) -> Document`, A4 scope; `FONT`/`MARGIN`/`TAB_POSITION`
+public constants as of this session so `rubric/measure.py` can reuse them
+rather than duplicate; `_new_paragraph()` zeroes `space_before`/
+`space_after` on every paragraph, fixed this session, see Known Issues);
+`pdf.py` (new this session: `render_pdf(docx_path, out_dir) -> Path`,
+wraps `soffice --headless --convert-to pdf` via subprocess, unique
+throwaway profile dir + 60s timeout). Tests: `test_bank.py` 16,
+`test_slop_lint.py` 22, `test_render.py` 24, `test_pdf.py` 9 (subprocess
+mocked throughout).
 
-- `src/jobengine/pipeline/extract.py` (new, C3): `ExtractionSchema`
-  (`required_keywords`, `preferred_keywords`, `tech_stack`; deliberately
-  narrower than `job_analysis`'s 6 LLM-populated columns, see D26 in
-  docs/decisions.md, `canonical_title`/`seniority` left `NULL` pending a
-  later phase that can validate them), `is_good_quality_jd()` (Lee's
-  "has a Requirements/Qualifications section" rule, deterministic regex,
-  not an LLM judgment call), `extract_keywords()` (the only place this
-  module talks to an LLM, goes through `router.get_provider("extract",
-  ...)` directly, never constructs its own `ollama` client, confirmed by
-  a test that inspects the module's own source text), and `analyze_job()`
-  (the production orchestration function: one LLM call per job regardless
-  of matched-profile count, since `required_keywords` doesn't depend on
-  profile; fans out to one `job_analysis` row per profile the job matches
-  via B3's `matches_profiles()`, and feeds only `required_keywords`,
-  never `preferred_keywords`/`tech_stack`, into `keyword_corpus`). The
-  extraction prompt (`_EXTRACTION_PROMPT`) went through two real
-  iterations this session and was reverted back to the original,
-  narrower, named-technology-focused wording; see D26 addenda 1 and 3 for
-  the measured evidence both ways. `job_analysis` gained a new
-  `CREATE UNIQUE INDEX idx_job_analysis_job_profile ON job_analysis
-  (job_id, profile)` in `schema.sql` (additive, applied against the real
-  db while the table held zero rows) so `db/models.py`'s new
-  `upsert_job_analysis()` can `ON CONFLICT` correctly; a re-run of
-  extraction for a job replaces its prior analysis rather than
-  accumulating history, matching `relevance_scores`'/`human_labels`'
-  convention. Also new in `db/models.py`: `JobAnalysis`/`ModelEval`
-  pydantic models, `upsert_keyword_corpus_entry()` (increments
-  `occurrences`, `first_seen_at` fixed on insert, `last_seen_at` always
-  advances), `insert_model_eval()`.
-- `tests/test_extract.py` (13 tests, written before implementation per
-  hard rule 7): `think=False` on this call path too (inherited from C1
-  but independently tested, not just assumed); one LLM call per job
-  regardless of matched-profile count; a job matching zero profiles skips
-  the LLM call entirely, not just the persistence; `job_analysis` gets
-  one row per matched profile with identical `required_keywords`; a
-  re-run upserts rather than duplicates; `keyword_corpus` occurrence
-  counts accumulate correctly across two jobs sharing a keyword.
-- `src/jobengine/eval/tasks/keyword_extraction.py`, `report.py`,
-  `harness.py`, `__main__.py` (new, fleshing out spec 07's module layout,
-  previously only `fixtures.py` existed): Task 2 only (Task 1 is C4's
-  scope, not wired in yet, an explicit `# TODO C4` marker in
-  `harness.py`, not a silent gap). `keyword_extraction.run()` pools
-  TP/FP/FN across all labeled jobs (not per-job ratios averaged) and
-  calls `jobengine.pipeline.extract.extract_keywords()` directly, the
-  exact same call C3's production path uses, deliberately bypassing
-  `router.call()`'s fallback wrapper so one bad call doesn't abort the
-  other jobs in the eval loop. The predicted set for scoring is
-  `required_keywords` UNION `preferred_keywords` on both sides (not
-  required-only, and not including `tech_stack`); see D26 addenda 2 for
-  why these are two different, non-symmetric calls, both closed, not to
-  be re-litigated per job. `report.py`'s `fixture_version` is a sha256 of
-  the fixture YAML's own bytes, computed at run time, not a hand-
-  maintained version string. CLI: `uv run python -m jobengine.eval
-  {run --model <name>, compare}`.
-- `tests/test_eval_keyword_extraction.py` (11 tests): a hand-built
-  scenario with known TP/FP/FN counts asserting exact precision/recall
-  values, not just a threshold check; schema-failure resilience (one bad
-  job doesn't abort the other 14); the required/preferred union and the
-  tech_stack exclusion, each with a dedicated test; `fixture_version`
-  hashing; `model_evals` row shape.
-- **`tests/fixtures/eval/human_labels.yaml` is, as of this session, the
-  cleanest ground truth this project has had**, per explicit user
-  request to fully re-review it. All 11 keyword-labelled jobs (of 50
-  total; the fixture's still-11-not-15 shortfall is C2's original,
-  already-flagged gap, unchanged this session, see Known Issues) were
-  re-derived from scratch: exhaustively pulled from each JD's real
-  qualifications-style sections only (Requirements/Minimum requirements/
-  Preferred/Nice to Have/"you might thrive if"-type bullets, explicitly
-  excluding "what you'll do"/responsibilities text even where it names
-  real skills, a deliberate scope boundary, not an oversight, see Known
-  Issues for which jobs lost real-looking terms because of it), with an
-  inline YAML comment on every term group quoting the exact source
-  sentence, human-reviewed against a side-by-side old-vs-new summary
-  table before being finalized. Along the way this also caught and fixed
-  3 real pre-existing data-quality bugs from the original C2 labeling
-  session, independent of anything this session did: `job_id` 2732/2809/
-  3267/3283 originally shared one verbatim copy-pasted generic AI/ML
-  keyword list (including on a job with nothing to do with ML, "Camera
-  Software Engineer, Consumer Devices"), and `job_id` 1705/2545 each had
-  invented or copy-pasted terms that don't appear anywhere in their real
-  JD text. See D26 in docs/decisions.md for the full history.
-- **Real, live model_evals history from this session (21 rows, 7 runs, 3
-  metrics each), all `qwen3.5:9b-q4_K_M`/`keyword_extraction`**, tracking
-  every fixture/prompt fix in order: 0.079/0.079 (original prompt, buggy
-  fixture) -> 0.250/0.158 (atomic-terms prompt fix) -> 0.358/0.279 (fixed
-  the 4-job duplicate-list bug) -> 0.530/0.534 (merged required+preferred
-  scoring, fixed 2 more data bugs) -> 0.380/0.681 ("non-tech skills"
-  prompt variant, same fixture) -> **0.833/0.467 (original prompt,
-  against the fully-reviewed fixture, the row that matches the code as
-  shipped)** -> 0.612/0.498 ("non-tech skills" variant re-tested against
-  the clean fixture, tried and rejected, see D26 addendum 3). **The
-  `model_evals` table's most recent row by `run_at` is the rejected
-  0.612/0.498 variant, not the 0.833/0.467 shipped state**, since
-  `model_evals` is an append-only log with no column marking which row
-  matches the current code; flagged in Known Issues so a future
-  `compare` doesn't get read as "current" by recency alone.
+**rubric/** (`src/jobengine/rubric/`, new this session): `measure.py`
+(real measurement functions: `select_for_profile()`, `coverage()`,
+`front_load()`/`front_load_detail()` and `line_count_from_pdf()` via real
+`pdfplumber` geometry, `measure_typography()` via docx XML, `stem()`,
+`iter_entries()`); `rules.py` (`check_r001`-`check_r013`, `RubricResult`/
+`Deficit` pydantic models, `score_resume()` orchestrator); `score.py`
+(weighted 0-100 score per spec 08's table); `__main__.py` (CLI: `uv run
+python -m jobengine.rubric {score,explain}`; `patch` not built, that's
+D3). `patch.py` does not exist yet. `tests/test_rubric.py`: 39 tests,
+including one full real-bank-through-real-render-through-real-PDF
+integration test.
+
+**sources/** (`src/jobengine/sources/`): `models.py` (`JobPosting`),
+`_client.py` (shared httpx client + retry policy), `greenhouse.py`/
+`ashby.py` (`fetch_board()`), `registry.py` (`seed`/`add`/`validate`,
+CLI), `sync.py` (`sync()`, the fetch-and-diff loop, CLI `uv run python -m
+jobengine.sources.sync [--dry-run]`). `config/seed_companies.yaml`: 15
+real companies. `scripts/sync.sh`: cron/Task Scheduler wrapper, live on
+Windows Task Scheduler task `job-engine-sync`, every 3h from 6am local.
+Tests: `test_sources.py` 20, `test_sync.py` 10.
+
+**pipeline/** (`src/jobengine/pipeline/`): `filter.py`
+(`load_filter_config()`, `matches_profiles()`, `is_remote()`,
+`is_excluded_employment_type()`, `is_already_applied()`,
+`is_citizenship_or_clearance_required()`, `is_above_target_seniority()`,
+`is_us_location()`/`classify_location()`; pure functions, nothing
+persisted). `config/filters.yaml`: all 5 hard/per-profile checks
+configured, `daily_cap: null` (deliberate, see D23). `extract.py`
+(`ExtractionSchema`, `is_good_quality_jd()`, `extract_keywords()` (the
+only LLM call site, via `router.get_provider("extract", ...)`),
+`analyze_job()` (production orchestrator, fans out to `job_analysis`/
+`keyword_corpus`)). Tests: `test_filter.py` 40, `test_extract.py` 14
+(gained `test_get_job_analysis_reads_back_a_written_row` this session).
+
+**llm/** (`src/jobengine/llm/`): `schemas.py`, `providers/local.py`
+(`LocalProvider`, `think=False` pinned on every call), `providers/
+anthropic.py` (guard-only, `call()` always raises `NotImplementedError`,
+see D25), `router.py` (`load_config()`, `get_provider()` billing guard,
+`call()` with fallback), `check.py` (CLI: `uv run python -m
+jobengine.llm.check`). `config/llm.toml`. Tests: `test_llm_local_
+provider.py` 4, `test_llm_router.py` 11, `test_llm_check.py` 6.
+
+**eval/** (`src/jobengine/eval/`): `fixtures.py` (`load_human_labels()`),
+`harness.py`/`report.py`/`tasks/keyword_extraction.py` (spec 07 Task 2
+only, Task 1/C4 not wired in), `__main__.py` (CLI: `uv run python -m
+jobengine.eval {run,compare}`). `tests/fixtures/eval/human_labels.yaml`:
+50 real JDs, 11 with hand-extracted keywords. Tests: `test_eval_
+fixtures.py` 6, `test_eval_keyword_extraction.py` 11.
+
+**Full suite: 240/240 passing, ruff clean** (3 pre-existing `RUF059`
+warnings in `test_render.py`, confirmed via `git stash` to predate this
+session, untouched).
+
+**`data/jobengine.db` real accumulated state, verified read-only this
+checkpoint:** 15 companies, 3882 jobs, 12 `runs` rows, 0 `applications`,
+**`job_analysis` and `keyword_corpus` both still 0 rows** (this session's
+real `analyze_job()` runs went to a scratch db copy only, per hard rule
+13, never the real path — see Known Issues), 150 `human_labels` rows, 30
+`model_evals` rows. `jobs` grew from 3846 and `runs` from 10 since the
+last checkpoint, both from genuine unattended scheduled fetches.
 
 ---
 
 ## Known issues and deferred work
 
+- **`job_analysis` and `keyword_corpus` are still 0 rows in the real
+  `data/jobengine.db`, and this now blocks `rubric score`/`explain` from
+  running against real production data, not just C3's corpus feature.**
+  `src/jobengine/rubric/__main__.py`'s `_load_job_keywords()` reads
+  `job_analysis` directly and raises a clear `SystemExit` if the
+  `(job_id, profile)` row doesn't exist; it deliberately never calls the
+  LLM itself (the rubric stays deterministic by construction, D8). This
+  session verified the CLI works end to end only against a scratch copy
+  of the db (`analyze_job()` run live, real Ollama, real persistence, but
+  to a `cp`'d file in the scratchpad, never `data/jobengine.db`). No
+  daily-pipeline orchestrator exists yet to populate `job_analysis` for
+  real jobs (same gap C3's session flagged, still open); until one does,
+  `rubric score` against a real job_id in the real db will always fail
+  with that `SystemExit` today.
+- `src/jobengine/rubric/measure.py`'s `stem()` is suffix-only
+  normalization, not synonym-aware. Confirmed against real C3 output this
+  session: "LLM" (a bank keyword tag) and "Large Language Models" (a real
+  extracted required keyword) do not match, correctly per spec 08's
+  literal "case and stem normalized" wording, but this under-counts
+  real coverage in practice. Revisit only if this recurs as a practical
+  problem in real usage, same pattern as D27; not fixed preemptively.
+- `src/jobengine/rubric/measure.py`'s `measure_typography()` (R010) checks
+  font/sizes/margins/tab-stop-position/justify-alignment universally but
+  checks line-spacing only against the valid pair (1.15/1.5), not
+  positionally validated per exact section. Deliberate scope reduction
+  (R010's job is catching drift in an already-rendered document, not
+  re-proving what `render.py`'s own golden test already proves at
+  construction time), not an oversight; see D28 addendum 3 in
+  docs/decisions.md.
+- `src/jobengine/rubric/__main__.py`'s `score`/`explain` commands derive
+  the docx path from the pdf path via `.with_suffix(".docx")`, requiring
+  the two files to sit side by side with matching stems. Works for
+  `scripts/render_pdf_sample.py`'s output and this session's manual CLI
+  checks; will need a real source of truth (`job_resume_variants.
+  docx_path`/`pdf_path` once D3/D4 populate that table) rather than a
+  filename convention once real variants exist.
+- `measure.select_for_profile()` (new this session, in
+  `src/jobengine/rubric/measure.py`) is the only place in the codebase
+  that filters bank content by profile. `render.py` itself still has no
+  per-profile filtering; nothing in the production pipeline calls
+  `select_for_profile()` outside `rubric/`'s own CLI and tests, since E2
+  (base resumes) hasn't started. Don't be surprised render() output looks
+  untailored if invoked directly.
 - **Process note for any future renderer change** (Projects section,
   Publications section, or anything else in `render.py` that touches
   layout): get a manual visual check against a real `.docx` open in Word
@@ -949,8 +504,11 @@ Status values: `not started` | `in progress` | `blocked` | `done`
 - **C3 shipped against a deliberate quality decision (D27 in
   docs/decisions.md), not spec 07's literal Task 2 gate.** Real measured
   extraction quality, qwen3.5:9b, against the fully-reviewed 11-job
-  fixture: precision 0.833 (passes), recall 0.467 (fails the 0.85 gate
-  by a wide margin). Two prompt variants and three real fixture bugs were
+  fixture, averaged over 4 identical-config live runs (the first run's
+  numbers alone were not reproducible, see the next bullet): precision
+  0.833-0.858 (mean 0.844, passes >= 0.70 in all 4 runs), recall
+  0.351-0.467 (mean 0.408, fails >= 0.85 in all 4 runs, never within
+  0.38 of it). Two prompt variants and three real fixture bugs were
   tried and measured before concluding further prompt/model iteration on
   this axis has diminishing (in one case, negative) returns; see D26
   addenda 1 and 3 for the full evidence. Not blocking, per D27's explicit
@@ -961,20 +519,27 @@ Status values: `not started` | `in progress` | `blocked` | `done`
   pipeline output later shows this recurring in practice, per D27's
   listed options (next candidate model, a deliberately-asked-about paid
   API call for this one stage, or accepting current quality).
-- **`model_evals`'s most recent row by `run_at` does not match the
-  extraction quality actually shipped.** The table is an append-only log
-  of every eval run (21 rows, 7 runs, this session), and the very last
-  run tried and rejected the "non-tech skills" prompt variant
-  (precision 0.612 / recall 0.498) before `extract.py` was reverted back
-  to the shipped state (precision 0.833 / recall 0.467, the second-to-
-  last run). Nothing in the schema marks which row corresponds to the
-  code currently in the repo. `uv run python -m jobengine.eval compare`
-  will show the rejected variant's numbers as the newest row; don't read
-  "most recent" as "current" without cross-checking `extract.py`'s actual
-  prompt text or re-running `eval run` fresh. A future session (or a
-  schema column, `is_current` or similar) could fix this properly; not
-  done here since it wasn't asked for and the workaround (re-run to get
-  a fresh, unambiguous number) is cheap.
+- **Real LLM sampling variance in Task 2's numbers, discovered and
+  resolved this session, not a hypothetical caveat.** The first
+  shipped-state eval run scored precision 0.833 / recall 0.467; a second,
+  immediately-following run with the exact same prompt, fixture, and
+  model scored 0.849 / 0.351, a 0.116 recall swing with zero code
+  changes, because `LocalProvider` pins `think=False` on every call but
+  not `temperature`/`seed`. Caught before it could sit in
+  docs/decisions.md as a misleadingly precise single number: ran 2 more
+  samples (4 total), updated D27 to cite the real range (precision
+  0.833-0.858, recall 0.351-0.467) and mean instead. The qualitative
+  conclusion (precision reliably passes, recall reliably fails by a wide
+  margin) holds across every sample, so this doesn't change what shipped,
+  only how honestly its quality is described. `model_evals`'s most
+  recent row by `run_at` now genuinely matches the shipped code (verified
+  by diffing `extract.py`'s prompt text against what was in place for
+  that run) — this was a real, temporary gap earlier in the session (the
+  most recent row was a rejected prompt variant, not the shipped state)
+  and is resolved as of this checkpoint, not still open. No schema change
+  made to prevent this recurring (e.g. an `is_current` column); if a
+  future session edits `extract.py`'s prompt again, re-run `eval run`
+  before trusting `compare`'s newest row.
 - **`job_analysis` and `keyword_corpus` have zero rows in the real db,
   still.** Only `extract_keywords()` (the raw LLM call) has been
   exercised live this session, via the eval harness; `analyze_job()` (the
@@ -1253,8 +818,9 @@ Status values: `not started` | `in progress` | `blocked` | `done`
   decision entries rather than folding into code comments alone: D26
   addenda 1-3 in docs/decisions.md.
 - **C3 ships with real extraction quality that does not meet spec 07's
-  numeric Task 2 gate (recall 0.467 vs. 0.85), a deliberate decision, not
-  a silent shortfall.** Confirmed by explicit user instruction, with
+  numeric Task 2 gate (recall 0.351-0.467 across 4 live runs vs. 0.85), a
+  deliberate decision, not a silent shortfall.** Confirmed by explicit
+  user instruction, with
   reasoning spanning the pipeline's own architecture (human review before
   every send), CLAUDE.md hard rule 2 (under-extraction can't invent
   content, the safe failure direction), and the limits of a static
@@ -1263,6 +829,27 @@ Status values: `not started` | `in progress` | `blocked` | `done`
   manual review later shows this matters in practice. TODO.md's C3
   checkbox and the Status table above both reference D27 explicitly
   rather than silently claiming the literal DoD passed.
+- `src/jobengine/resume/pdf.py`'s `render_pdf()` does not use "the pptx
+  skill's wrapper" spec 03 names for the sandbox: no such skill exists in
+  this session's available tools (checked the skill list directly). Used
+  a plain `subprocess` wrapper instead (no new dependency), with a unique
+  throwaway `-env:UserInstallation` profile dir per call and a 60s
+  timeout, the two concrete mitigations for the hang spec 03 warns about.
+  Not asked separately: the referenced skill genuinely doesn't exist here,
+  there was no real choice to confirm.
+- Four decisions from D1 confirmed by asking rather than guessed, all
+  recorded as D28 (with 3 addenda) in docs/decisions.md, significant
+  enough for their own entries: (1) D1 absorbed D2's scope entirely,
+  because R002 has no fallback measurement in spec 08 and R006's fallback
+  is explicitly scoped to the bank validator, not the rubric pipeline;
+  (2) score.py's "keyword density in first role" and "bullets carrying
+  2+ keywords" formulas, which spec 08 names but never defines; (3)
+  `measure.select_for_profile()`, a new minimal candidate-resume filter,
+  confirmed as deliberately distinct from D3's patch ladder scope; (4)
+  two scope reductions in `measure.py` (stem-only keyword matching, no
+  synonyms; R010's line-spacing check against a valid pair rather than
+  positional validation), both flagged as known limits, not fixed
+  preemptively.
 
 ---
 
@@ -1270,6 +857,46 @@ Status values: `not started` | `in progress` | `blocked` | `done`
 
 (Newest first. Date, task id, what changed, what to do next.)
 
+- 2026-08-04, A4b + D1 + D2 (all done): Closed A4b first (TODO.md rule 1
+  requires Phase A fully green before Phase D; A4b's own line says it
+  "must land before the rubric phase starts"), then planned and built D1
+  against real data throughout. A4b: `resume/pdf.py`'s `render_pdf()`
+  wraps `soffice --headless` via subprocess (no "pptx skill" available in
+  this session, see Decisions), verified live against the real binary on
+  2 distinct real full-bank renders; found and fixed a real pre-existing
+  renderer bug along the way (every paragraph inheriting python-docx's
+  default 10pt `w:after` spacing, caught by the user measuring real PDF
+  geometry with pdfplumber, not by any test) via a new `_new_paragraph()`
+  helper in `render.py`. D1: built `src/jobengine/rubric/{measure,rules,
+  score}.py` plus a CLI, all 13 hard rules from spec 08 plus the weighted
+  score. R002/R006 turned out to have no real fallback in spec 08, so D2
+  (PDF geometry) got absorbed into D1's implementation rather than staying
+  a separate session; D2's own literal DoD (`rubric explain R002` prints
+  real y-coordinates) was re-run live at checkpoint time and passes. Four
+  design decisions confirmed by asking, all recorded as D28 (3 addenda) in
+  docs/decisions.md: D2's absorption, two undefined score-component
+  formulas, `select_for_profile()` as a new minimal candidate-resume
+  filter, and two deliberate scope reductions (stem-only keyword matching,
+  R010's line-spacing check). Grounded against real data twice: before
+  coding (live C3 `extract_keywords()` against 3 real JDs pulled from the
+  live db) and after (a real `job_analysis` row persisted via `analyze_job
+  ()` to a scratch copy of the db, never `data/jobengine.db`, then the
+  actual CLI run against it end to end). Real numbers: coverage
+  0.27/0.06/0.33 against the 3 real JDs (all correctly fail R001; the
+  robotics job's near-zero coverage against an ML/SWE bank is exactly
+  right), R003 correctly flagged a real under-provisioned role for
+  `software_engineer`, cross-validated by R013 catching the identical gap
+  via slop_lint's own H004. `tests/test_rubric.py`: 39 tests, written
+  before implementation per hard rule 7, one failing fixture per hard
+  rule plus one full real-bank-through-real-render-through-real-PDF
+  integration test. Also added `db/models.py`'s `get_job_analysis()`
+  (new read accessor) with its own test. `uv run pytest` 240/240 passing;
+  `ruff check`/`format --check` clean on everything touched (same 3
+  pre-existing `test_render.py` `RUF059` findings, confirmed via `git
+  stash` to predate this session, untouched). TODO.md's A4b/D1/D2
+  checkboxes all checked. Next: D3 (patch ladder P0-P2, deterministic
+  only) is next in TODO.md's order; needs your go-ahead before starting
+  per the session protocol.
 - 2026-08-04, C3 (done, shipped against D27, not the literal gate): Built
   `pipeline/extract.py` (extraction call via C1's router + job_analysis/
   keyword_corpus persistence) and `eval/{harness,report,tasks/
@@ -1293,10 +920,20 @@ Status values: `not started` | `in progress` | `blocked` | `done`
   real job was failing before the actual cause, non-technology terms
   read as soft skills, was found and fixed) — same standard as B3's
   inclusion-exclusion reconciliation, applied to model-quality debugging
-  instead of filter counts. Final real numbers: precision 0.833 (passes
-  the 0.70 gate), recall 0.467 (fails the 0.85 gate) against the fully-
-  reviewed fixture, on the reverted, better-precision prompt. **C3 marked
-  done anyway, per explicit user decision (D27 in docs/decisions.md):
+  instead of filter counts. Final real numbers, on the reverted,
+  better-precision prompt against the fully-reviewed fixture: the first
+  live run scored precision 0.833 / recall 0.467, but a second identical
+  run scored 0.849 / 0.351, real LLM sampling variance
+  (`temperature`/`seed` unpinned) rather than a stable point value; ran 2
+  more samples (4 total) rather than let one lucky/unlucky number stand
+  as *the* answer, giving precision 0.833-0.858 (mean 0.844, passes the
+  0.70 gate in all 4 runs) and recall 0.351-0.467 (mean 0.408, fails the
+  0.85 gate in all 4 runs, never within 0.38 of it). `model_evals` now
+  holds all 10 real keyword_extraction runs from this session (30 rows);
+  its most recent row genuinely matches the shipped code, closing what
+  was briefly a real gap (the newest row was a rejected prompt variant
+  for part of this session). **C3 marked done anyway, per explicit user
+  decision (D27 in docs/decisions.md):
   human review gates every resume send, recall gaps only under-extract
   and can't invent content under hard rule 2, and an 11-job fixture can
   only approximate real usage; revisit if manual review of real output

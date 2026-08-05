@@ -171,6 +171,16 @@ def get_job(
     return Job(**dict(row))
 
 
+def get_job_analysis(conn: sqlite3.Connection, job_id: int, profile: str) -> JobAnalysis | None:
+    row = conn.execute(
+        "SELECT * FROM job_analysis WHERE job_id = ? AND profile = ?",
+        (job_id, profile),
+    ).fetchone()
+    if row is None:
+        return None
+    return JobAnalysis(**dict(row))
+
+
 def get_company(conn: sqlite3.Connection, slug: str, ats: str) -> Company | None:
     row = conn.execute(
         "SELECT * FROM companies WHERE slug = ? AND ats = ?",

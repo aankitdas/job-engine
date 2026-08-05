@@ -267,6 +267,20 @@ def test_analyze_job_writes_one_job_analysis_row_per_matched_profile(conn):
     assert rows[0]["keyword_hash"] == rows[1]["keyword_hash"]
 
 
+def test_get_job_analysis_reads_back_a_written_row(conn):
+    from jobengine.db.models import get_job_analysis
+
+    job_id = _seed_job(conn)
+    job = Job(id=job_id, **_job_kwargs())
+    client = _FakeClient(_PAYLOAD)
+    _run(analyze_job(conn, job, _two_profile_config(), _llm_config(), local_client=client))
+
+    analysis = get_job_analysis(conn, job_id, "ai_ml_engineer")
+    assert analysis is not None
+    assert json.loads(analysis.required_keywords) == _PAYLOAD["required_keywords"]
+    assert get_job_analysis(conn, job_id, "data_scientist") is None
+
+
 def test_analyze_job_rerun_upserts_instead_of_duplicating(conn):
     job_id = _seed_job(conn)
     job = Job(id=job_id, **_job_kwargs())
