@@ -3,13 +3,17 @@ from pydantic import ValidationError
 
 from jobengine.db.migrate import connect, init
 from jobengine.resume.bank import (
+    DEFAULT_BANK_PATH,
     Bank,
     Bullet,
+    BulletVariant,
     Education,
     Meta,
     Role,
     SummaryBullet,
     coverage_gaps,
+    dump_bank,
+    load_bank,
     validate_bank,
 )
 
@@ -261,3 +265,79 @@ def test_unknown_profile_in_requires_degree_profiles_is_flagged():
     bank = Bank(meta=Meta(owner="Test", updated="2026-01-01"), education=[edu])
     report = validate_bank(bank)
     assert any(issue.rule == "profiles" for issue in report.errors)
+
+
+# ---------------------------------------------------------------------------
+# D4: BulletVariant, Bullet.variants, dump_bank round-trip
+# ---------------------------------------------------------------------------
+
+
+def test_bullet_defaults_to_no_variants():
+    bullet = _valid_bullet()
+    assert bullet.variants == []
+
+
+def test_bullet_accepts_a_variant():
+    variant = BulletVariant(
+        text="Rewritten phrasing that adds a keyword.",
+        keywords_added=["Kubernetes"],
+        created_at="2026-08-05",
+        used_count=1,
+    )
+    bullet = _valid_bullet(variants=[variant])
+    assert bullet.variants[0].text == "Rewritten phrasing that adds a keyword."
+    assert bullet.variants[0].keywords_added == ["Kubernetes"]
+    assert bullet.variants[0].used_count == 1
+
+
+def test_variant_used_count_defaults_to_zero():
+    variant = BulletVariant(text="...", created_at="2026-08-05")
+    assert variant.used_count == 0
+    assert variant.keywords_added == []
+
+
+def test_dump_bank_round_trips_a_small_bank(tmp_path):
+    role = _valid_role()
+    bank = _bank_with_role(role)
+    out_path = tmp_path / "bank.yaml"
+
+    dump_bank(bank, out_path)
+    reloaded = load_bank(out_path)
+
+    assert reloaded == bank
+
+
+def test_dump_bank_round_trips_a_bullet_with_a_variant(tmp_path):
+    variant = BulletVariant(
+        text="Rewritten phrasing.",
+        keywords_added=["Kubernetes"],
+        created_at="2026-08-05",
+        used_count=2,
+    )
+    role = _valid_role(bullets=[_valid_bullet(variants=[variant])])
+    bank = _bank_with_role(role)
+    out_path = tmp_path / "bank.yaml"
+
+    dump_bank(bank, out_path)
+    reloaded = load_bank(out_path)
+
+    assert reloaded == bank
+    assert reloaded.roles[0].bullets[0].variants[0].used_count == 2
+
+
+def test_dump_bank_round_trips_the_real_bank_with_no_data_loss(tmp_path):
+    """Not a formatting-fidelity guarantee (a generic YAML dumper will not
+    byte-for-byte match a hand-authored file's exact style), only a data
+    one: every field pydantic-equal after load -> dump -> reload. Wiring
+    this against the real resume/bank/aankit.yaml automatically is a
+    separate, deliberate action, confirmed by asking not to build yet
+    (see D30 in docs/decisions.md); this test only proves the mechanism
+    is safe to use later, via a tmp_path copy, never writing to the real
+    file."""
+    original = load_bank(DEFAULT_BANK_PATH)
+    out_path = tmp_path / "aankit_copy.yaml"
+
+    dump_bank(original, out_path)
+    reloaded = load_bank(out_path)
+
+    assert reloaded == original

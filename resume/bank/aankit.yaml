@@ -63,11 +63,10 @@ roles:
         how: "combined silence-boundary audio chunking with timestamp
               deduplication and a sliding text window for guardrail checks"
         result: "eliminated boundary-induced false positives during real-time streaming"
-        text: "Implemented a two-layer voice activity detection chunking
-               pipeline that combined silence-boundary audio chunking with
-               timestamp deduplication and a sliding text window for
-               guardrail checks, eliminating boundary-induced false
-               positives during real-time streaming"
+        text: "Built a two-layer voice activity detection pipeline
+               combining silence-boundary audio chunking, timestamp
+               deduplication, and a sliding guardrail text window,
+               eliminating false positives during real-time streaming"
         keywords: [VAD, real-time streaming, audio chunking]
         evidence: "internal"
         profiles: [ai_ml_engineer, software_engineer]
@@ -79,8 +78,8 @@ roles:
         result: "let engines swap with zero code changes"
         text: "Built a provider-agnostic adapter registry across Parakeet
                TDT, Whisper, AssemblyAI, and Gemini with quality-based
-               fallback and session health checks driven entirely by
-               config, letting engines swap with zero code changes"
+               fallback and config-driven session health checks, letting
+               engines swap with zero code changes"
         keywords: [adapter registry, fallback, config-driven]
         evidence: "internal"
         profiles: [ai_ml_engineer, software_engineer]
@@ -92,10 +91,10 @@ roles:
               naturalness, pacing, and latency per K-12 grade band"
         result: "produced cost-quality comparisons that guided engine selection"
         text: "Evaluated neural text-to-speech engines pyttsx3, Kokoro,
-               edge-tts, Chatterbox, and Chirp against a structured rubric
-               of intelligibility, naturalness, pacing, and latency per
-               K-12 grade band, producing cost-quality comparisons that
-               guided engine selection"
+               edge-tts, Chatterbox, and Chirp against a rubric of
+               intelligibility, naturalness, pacing, and latency per K-12
+               grade band, producing cost-quality comparisons that guided
+               engine selection"
         keywords: [text-to-speech, evaluation rubric]
         evidence: "internal"
         profiles: [ai_ml_engineer, data_scientist]

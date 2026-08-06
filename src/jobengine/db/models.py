@@ -89,6 +89,19 @@ class ModelEval(BaseModel):
     run_at: str
 
 
+class BaseResume(BaseModel):
+    id: int | None = None
+    profile: str
+    version: int
+    selection: str
+    section_order: str
+    docx_path: str | None = None
+    pdf_path: str | None = None
+    rubric: str | None = None
+    generated_at: str
+    retired_at: str | None = None
+
+
 def upsert_company(conn: sqlite3.Connection, company: Company) -> None:
     """Insert a company, or update it on (slug, ats) conflict.
 
@@ -171,7 +184,9 @@ def get_job(
     return Job(**dict(row))
 
 
-def get_job_analysis(conn: sqlite3.Connection, job_id: int, profile: str) -> JobAnalysis | None:
+def get_job_analysis(
+    conn: sqlite3.Connection, job_id: int, profile: str
+) -> JobAnalysis | None:
     row = conn.execute(
         "SELECT * FROM job_analysis WHERE job_id = ? AND profile = ?",
         (job_id, profile),
@@ -322,3 +337,33 @@ def insert_model_eval(conn: sqlite3.Connection, model_eval: ModelEval) -> int:
         model_eval.model_dump(exclude={"id"}),
     )
     return cursor.fetchone()[0]
+
+
+def insert_base_resume(conn: sqlite3.Connection, base_resume: BaseResume) -> int:
+    """Append-only, like outcomes/model_evals: a new version is a new row,
+    never an update to a prior one (spec 09: "Versioned, never
+    overwritten. Keep at least the previous two versions live.")."""
+    cursor = conn.execute(
+        """
+        INSERT INTO base_resumes (
+            profile, version, selection, section_order, docx_path, pdf_path,
+            rubric, generated_at, retired_at
+        ) VALUES (
+            :profile, :version, :selection, :section_order, :docx_path, :pdf_path,
+            :rubric, :generated_at, :retired_at
+        )
+        RETURNING id
+        """,
+        base_resume.model_dump(exclude={"id"}),
+    )
+    return cursor.fetchone()[0]
+
+
+def latest_base_resume_version(conn: sqlite3.Connection, profile: str) -> int:
+    """0 if no base_resumes row exists yet for this profile, so callers can
+    always write `version=latest_base_resume_version(conn, profile) + 1`
+    uniformly, including the very first one."""
+    row = conn.execute(
+        "SELECT MAX(version) AS v FROM base_resumes WHERE profile = ?", (profile,)
+    ).fetchone()
+    return row["v"] or 0

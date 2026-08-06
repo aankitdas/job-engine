@@ -667,3 +667,472 @@ R010's job in the rubric is catching drift in an already-rendered
 document (a bad manual edit, a future P3 rewrite), not re-proving what
 the golden test already proves at render time, so this scope reduction
 was a deliberate call, not a gap found by accident.
+
+**D28 addendum 4: the first pass of D1/D2's absorption missed a real,
+explicit spec 08 requirement, caught at checkpoint review rather than
+during implementation.** Spec 08's Front-loading measurement section
+says "cache the extraction per rendered file hash so repeated scoring is
+free"; the initial `measure.py` had no caching at all, meaning
+`rules.score_resume()`'s per-bullet call to `line_count_from_pdf()`
+independently re-opened and fully re-parsed the whole PDF via
+`pdfplumber` for every bullet and summary in the candidate resume (15+
+full re-parses for one `score_resume()` call against the real bank).
+This was found by the user asking, at the next checkpoint, whether D2
+had any remaining work beyond the literal DoD line, not by an initial
+oversight check during D1 itself — worth recording as a reminder that a
+narrow DoD line passing is not the same as a spec section being fully
+implemented. Fixed: `measure._parsed_pdf()` parses a given PDF exactly
+once per process, cached by a sha256 of the file's own bytes (not its
+path, so two different paths pointing at byte-identical content, e.g.
+the Storage section's `job_resume_variants` dedup case, share one cache
+entry); `front_load()`, `front_load_detail()`, `line_count_from_pdf()`,
+`page1_height()`, and a new `page_count()` all route through it, with a
+bounded (32-entry, simple oldest-in eviction, not a true LRU) cache dict
+rather than an unbounded one. Verified with a real, non-mocked call
+count: `pdfplumber.open` calls for one full `score_resume()` run against
+the real bank dropped from 2 (down from what would have been 15+ pre-fix)
+to 1, with identical scoring output before and after, confirming the
+change affected performance only, not correctness.
+
+---
+
+**D29. D3's patch ladder (P0-P2) confirmed working via a real deficit
+closing, and two significant, real limitations of the *current* bank
+found while grounding it, not assumed going in.**
+
+`src/jobengine/rubric/patch.py` implements P0 (reorder), P1 (swap), and
+P2 (promote) exactly as specified, all deterministic, zero model calls.
+`run_ladder()` re-renders and re-scores through D1's real pipeline after
+every tier, per spec 08's "every tier re-runs the full rubric afterward."
+
+**The real closure that satisfies D3's DoD:** `required_keywords =
+["Chroma DB"]` (a real bank tag, on a real bullet in `role_docintel`, a
+project role) scored R002 FAIL before any patching (front_load 0.00 <
+0.75: the keyword is genuinely covered, `coverage` is 1.0, but lives in
+the Projects section, which renders after Work History in the
+`section_order` used throughout this session). After running P0/P1/P2
+through the real render → real PDF (A4b) → real pdfplumber geometry →
+`score_resume()` pipeline, P2 promoted `"projects"` to the front of
+`section_order`, and R002 flipped to PASS (front_load 1.0), with
+`hard_failures` empty. This is `["Chroma DB"]` deliberately chosen as a
+single real, already-covered-but-poorly-positioned bank keyword, not a
+full job's live-extracted `required_keywords` list, after the two
+findings below made clear why no organically-sampled real job closed via
+the ladder. Confirmed by direct measurement, not asserted: `passed` flips
+from `False` to `True`, `hard_failures` from `["R002"]` to `[]`, in the
+same process, same code path, same real files.
+
+**Finding 1: P1 (swap) is structurally a no-op against the bank as it
+exists today, for any job, not a bug in P1's logic.** `measure.
+select_for_profile()` (D28 addendum 2) already includes *every*
+profile-tagged bullet in a role; it is an all-or-nothing filter, not a
+ranked top-N selection. That means there is never a "selected vs.
+eligible-but-currently-unselected" distinction within a role for P1 to
+exploit, because nothing is ever held back, for any role, for any
+profile, given the bank's current bullet counts (all within R003's 3-8
+range except `role_utd_researcher`'s single `software_engineer`-tagged
+bullet, a separate known content gap, see Known Issues). Verified
+directly: for every role and every profile, the set of profile-tagged
+bullets equals the set select_for_profile() returns, with nothing left
+over. P1 will start doing real work automatically the day any role
+accumulates more profile-tagged bullets than R003's ceiling allows for
+that profile; nothing in patch.py needs to change for that to happen.
+
+**Finding 2: across 9 real, live-extracted job postings (both
+`ai_ml_engineer` and `software_engineer`, explicitly searched across the
+live db for topical overlap with the bank's actual strengths: RAG,
+embeddings, speech/audio, document intelligence, not just generic "ML
+engineer" titles), none closed a deficit via P0-P2.** Two independent,
+well-understood structural reasons, not one: (a) Finding 1 above rules
+out P1 entirely; (b) `role_bantrly` is the only role whose content
+plausibly reaches page 1's top half (confirmed: a required-keywords list
+of just `["embeddings"]`, covered only by that role's 5th and last
+bullet, already scored front_load 1.0 *before* any patching at all,
+meaning the role's rendered content already sits entirely within the
+front-loaded region regardless of internal bullet order), and none of
+the 9 real postings' required keywords happened to both (i) exist in the
+bank at all and (ii) be positioned sub-optimally *within* that one role.
+P0 did visibly reorder two bullets in `role_docintel` for one real
+posting (job 467, a real Airbnb LLM fine-tuning role), but `role_docintel`
+renders on page 2-3, so no bullet reorder within it can affect R002
+either way. This is a real, current-content limitation, not a patch
+ladder defect: P0/P2 both fired correctly and did real, verifiable work
+the moment a keyword's actual position (Chroma DB, in Projects) gave them
+something to fix.
+
+**D29 addendum: R009's date-overlap loosening (measure.
+is_reverse_chronological, see its own docstring) was confirmed by asking
+before being applied, since it changes the semantics of an already-
+shipped, signed-off D1 hard rule, not something to reinterpret silently.**
+The original strict start-date-monotonic check meant P0's "sort roles
+only if two are concurrent" permission was inert on every pair in the
+real bank (no two roles share an exact start month), since even
+genuinely overlapping roles (`role_sei` 2021-10 to 2023-08, `role_unl`
+2021-05 to 2023-06) have different start dates. Confirmed: redefine a
+violation as a role appearing before an earlier, non-overlapping role,
+not merely a different start date. Two genuinely overlapping roles may
+now appear in either order without failing R009, matching the natural
+meaning of "concurrent" in resume-writing. Also confirmed by asking,
+separately: P0 does not automatically reorder project roles relative to
+each other (they have no R009 constraint at all, but "no constraint"
+isn't the same as "any order is fine to reshuffle automatically, with no
+review gate, based purely on per-job keyword score"); that kind of
+visible reordering stays P2's explicit, coarser "promote" step, per
+D3's confirmed scope.
+
+---
+
+**D30. D4's P3 (rephrase) writeback is built and tested but deliberately
+not wired to the real resume/bank/aankit.yaml, and the traceability guard
+is stricter than spec 08's literal text, both confirmed by asking.**
+
+`apply_variants_to_bank()` (in `src/jobengine/rubric/patch.py`) returns a
+new, in-memory `Bank` with accepted P3 rewrites recorded as
+`BulletVariant` entries (new `bank.py` model, `used_count` incremented on
+reuse); `dump_bank()` (new `bank.py` function) serializes a `Bank` back
+to YAML, tested only via round-trip against tmp_path copies, including
+the real `resume/bank/aankit.yaml` loaded read-only and dumped to a
+tmp_path copy (never the real file). Nothing in this codebase calls
+`dump_bank()` against the real file. Confirmed by asking before building
+D4 at all: this is the first time anything in this project would
+automatically write to a hand-authored source file (A2's own note: "the
+longest manual step... do not let an agent speed-run it"), and a generic
+YAML dumper reordering keys or reformatting strings would drown a real
+content change in unreviewable noise. Persisting a real variant to the
+real bank is a separate, deliberate, future action.
+
+**The traceability guard (`validate_rewrite`, CLAUDE.md hard rule 12) is
+deliberately stricter than spec 08's literal wording in places, not a
+loophole-closing afterthought.** `slop_lint.py`'s `_TECH_JARGON_TERMS` (a
+~20-term hand-maintained allowlist) was considered and rejected as the
+detection mechanism: it can only catch a fabrication that happens to
+already be on that list, not a genuinely novel one, which is exactly the
+failure mode hard rule 12 exists to prevent. Implemented instead as a
+general token check: any word starting uppercase or any digit run, in
+the rewrite, that isn't the bullet's own opening word (always capitalized
+by sentence position, never a new claim) and doesn't appear anywhere in
+the parent's what/how/result or identity.toml, is rejected. This will
+reject some legitimate rewrites a looser check would allow (e.g. a
+freshly-coined acronym); over-rejection costs a P3 attempt and is the
+safe failure direction per hard rule 2, so this was a deliberate choice,
+confirmed by asking, not an oversight.
+
+**A real implementation bug was found and fixed via live grounding
+against the real model, not by this session's own synthetic tests.**
+The first version of P3's rewrite application (`_with_bullet_text`)
+updated only a bullet's `.text` on an accepted rewrite, never merging
+`keywords_added` into `.keywords`. A live run against the real bank
+(required_keywords=["CMB"], a real term present in `role_utd_researcher`'s
+`b_utd_02.what` field but untagged anywhere) showed a real, unmocked
+model producing a correctly-guarded, accepted rewrite with
+`keywords_added: ["CMB"]` — yet `coverage` stayed 0.0 after acceptance,
+because R001's coverage math reads `bullet.keywords`, not `bullet.text`,
+and the keyword was never actually added to the working candidate. Fixed
+by renaming `_with_bullet_text` to `_with_bullet_rewrite`, now merging
+`keywords_added` (stem-deduplicated) into the transient candidate
+bullet's `.keywords` alongside the text change; the canonical `full_bank`
+passed to `apply_p3` is never touched by this, only the working candidate
+used for this specific job's render/score. Re-ran the same live case
+after the fix: coverage 0.0 -> 1.0, R001 dropped out of `hard_failures`.
+A regression test
+(`test_apply_p3_accepted_rewrite_merges_keywords_added_into_the_working_bank`)
+was added after the fact, confirmed failing against the pre-fix code and
+passing after; flagged here because the bug was caught by real-model
+grounding, not by this session's own initial test-writing, worth
+remembering as a reason real-data checks earn their keep even after
+"tests green."
+
+**Two real live-model runs (real Ollama, not mocked) confirm the whole
+P3 mechanism end to end.** (1) `required_keywords` from a real job
+(Robinhood "Machine Learning Engineer", job_id 318, whose deficit D3
+already confirmed P0-P2 cannot close): the real model, asked to
+incorporate "SQL"/"XGBoost", declined to fabricate either and returned a
+rewrite with `keywords_added: []`, a plain reorganization of the parent
+bullet's own `what` field text; accepted (nothing to reject), but
+correctly did not move `coverage` at all, since it added nothing new.
+(2) `required_keywords=["CMB"]` (the fix-verifying case above): the real
+model correctly surfaced an already-present, genuinely-describable term
+as a new keyword tag, verified traceable to the parent's own `what`
+field, closing that specific R001 deficit for real. Together these show
+the model itself tends to behave safely under this prompt, and the guard
+is what makes that reliable and enforceable rather than merely hoped for.
+
+**D30 addendum: the keywords_added fix above was re-verified live, but
+initially only against `run_ladder()`'s in-memory return value, not the
+persisted bank state — the user caught this gap explicitly and asked for
+it to be closed, not just reasserted.** "Re-verified live after the fix"
+originally meant: same required_keywords=["CMB"] case, same real model,
+confirmed `coverage` 0.0 -> 1.0 in the `PatchResult` returned by a single
+`run_ladder()` call. That is real, but it only exercises the transient
+working candidate `apply_p3` builds for that one call; it says nothing
+about whether `apply_variants_to_bank()`'s output, once actually
+persisted via `dump_bank()` and reloaded via `load_bank()`, still carries
+the improvement, or whether a second, independent `run_ladder()` call
+against that reloaded bank correctly finds and reuses the variant. Ran
+the full chain live, for real, on the exact same reproduction case, not
+a fresh similar one: (1) real `run_ladder()` call, real Ollama, accepted
+rewrite, `coverage` 0.0 -> 1.0 in the return value; (2)
+`apply_variants_to_bank()` on the canonical `full_bank` — confirmed the
+canonical bullet's own `text`/`keywords` stay unchanged, only a new
+`BulletVariant` is appended; (3) `dump_bank()` to a real file on disk
+(scratch path, never the real `resume/bank/aankit.yaml`); (4)
+`load_bank()` reload, confirmed pydantic-equal to the pre-dump bank; (5)
+a **second, independent** `run_ladder()` call using the reloaded
+(from-disk) bank as `full_bank` — confirmed it found and reused the
+persisted variant (`reused_existing_variant=True`, zero new LLM calls
+this time) and `coverage` was 1.0 again, for this separate run; (6)
+`used_count` incremented 1 -> 2 on this second, independent use. All six
+steps passed on the first real attempt. A permanent regression test,
+`test_accepted_p3_rewrite_survives_persist_reload_and_is_reused_with_
+coverage_intact` (`tests/test_patch.py`), was added afterward so this
+composed chain, not just each step's own separate unit test, stays
+covered by the automated suite; it exercises `apply_p3()` directly
+rather than the full render/PDF pipeline, for speed, but the sequence of
+operations (accept, writeback, persist, reload, reuse, re-verify
+coverage) is identical to what the live run exercised.
+
+**D30 second addendum (2026-08-05): the "re-verified live" claims above
+were prose only, no captured evidence in this repo. The user asked
+directly whether the persisted bank state had actually been checked and
+whether a repro had been shown, not just re-asserted; it had not, in
+this session's context. Re-ran the whole chain live, for real, with
+every intermediate value printed and shown, and that run (not the prose
+above) is now the citable evidence.**
+
+Correcting a conflation risk first: **the CMB case is not job_id 318's
+own deficit.** Job 318's (Robinhood "Machine Learning Engineer") real
+required_keywords, per D3's own live extraction, are terms like
+`SQL`/`XGBoost` from its actual JD, the case where the model correctly
+declined to fabricate (see the "Two real live-model runs" paragraph
+above). `required_keywords=["CMB"]` targets a genuinely different,
+unrelated bullet, `role_utd_researcher`'s `b_utd_02`, chosen by
+`_select_p3_target` because it has the fewest keywords (2) and shortest
+text (118 chars) of any bullet in the real bank, not because of any
+connection to job 318. The two cases were run together for convenience
+in earlier sessions and should not be cited as the same deficit.
+
+Ran a standalone script (scratch, not part of the automated suite) against
+the real `resume/bank/aankit.yaml` (loaded read-only) and real
+`identity.toml` (loaded read-only), real Ollama via `OLLAMA_BASE_URL`
+(`qwen3.5:9b-q4_K_M`), `required_keywords=["CMB"]`:
+
+1. `measure.coverage(bank, ["CMB"]) == 0.0` before anything runs.
+   `_select_p3_target(bank)` selects `role_utd_researcher`/`b_utd_02`,
+   `keywords=['data processing', 'large-scale datasets']`, no existing
+   variants.
+2. Live call returned (raw, schema-parsed): `text="Processed and managed
+   1,600 high-resolution CMB simulated maps totaling 24GB across
+   multiple train, validation, and test splits to produce a clean,
+   reproducible dataset for model training."`, `keywords_added=["CMB"]`,
+   `accepted=True`.
+3. `validate_rewrite()` re-run explicitly against that output:
+   `violations == []`. Every capitalized/numeric token in the rewrite
+   (1,600, CMB, 24GB, train/validation/test) traces to the bullet's own
+   `what`/`how`/`result`.
+4. `apply_variants_to_bank()`: canonical bullet's `.text` and `.keywords`
+   confirmed byte-identical to before (`['data processing',
+   'large-scale datasets']`); a new `BulletVariant` appended
+   (`keywords_added=["CMB"]`, `used_count=1`). **
+   `measure.coverage(canonical_with_variant, ["CMB"])` stays `0.0`** —
+   this is the precise mechanism, not a bug: `coverage()` reads
+   `bullet.keywords`, and a variant is never merged into the canonical
+   bullet's own `.keywords`. The improvement lives only on the variant
+   and on whatever working candidate a `apply_p3()`/`run_ladder()` call
+   actually builds from it, never on the canonical bank directly.
+5. `dump_bank()` to a scratch path (never the real `aankit.yaml`),
+   `load_bank()` reload, confirmed pydantic-equal to the pre-dump bank.
+   A **second, independent** `apply_p3()` call against the reloaded
+   (from-disk) bank found and reused the persisted variant
+   (`reused_existing_variant=True`, zero new LLM calls this time); the
+   working candidate it returned scored `measure.coverage(..., ["CMB"])
+   == 1.0`.
+
+Net: `0.0 -> 1.0`, confirmed live, on the working candidate, exactly as
+claimed, with the canonical bank's own bullet fields verified untouched
+at every step. One thing this particular run did **not** re-check live:
+the `used_count` 1->2 increment on a *second* `apply_variants_to_bank()`
+call — that increment path remains covered only by the existing
+`FakeClient`-based regression test
+(`test_accepted_p3_rewrite_survives_persist_reload_and_is_reused_with_
+coverage_intact`), not by today's live run. Flagged here rather than
+silently folded into "all six steps re-verified," per the same standard
+this addendum is itself applying.
+
+---
+
+**D31. E1 (profile registry + `profiles brief`) ships with the top
+corpus keywords and current-measurements sections falling back to real
+existing code when their real data source is empty, and "profile
+config" turned out to be `render.py`'s own stated dependency, not a
+tangent.**
+
+Two things anchored E1's scope rather than requiring a guess. First,
+`resume/render.py`'s `RenderProfile` dataclass docstring already said
+outright: *"Stand-in for E1's not-yet-built profile registry... where
+that data ultimately comes from is E1's decision, not render.py's."*
+Second, `rules.score_resume()`'s own docstring: *"the caller decides
+what 'the current base resume' means, this function just scores it."*
+Together these settled what would otherwise have been two separate
+open questions (does E1 need to build a profile registry, and what does
+"current base resume" mean before any base resume exists) into things
+the codebase had already flagged as E1's job specifically, not invented
+fresh.
+
+**Profile registry** (`config/profiles.yaml` +
+`src/jobengine/profiles/config.py`): one `ProfileConfig` entry per
+`bank.KNOWN_PROFILES` value (`display_name`, `section_order`,
+`include_summary`, `summary_text`), `to_render_profile()` adapting it to
+`render.py`'s `RenderProfile`. All 3 profiles ship with the same flat
+`section_order` (`work_history, projects, education, publications`) and
+`include_summary: false`, matching what every existing `RenderProfile`
+call site (`patch.py`'s `run_ladder()`, `scripts/render_sample.py`,
+`scripts/render_pdf_sample.py`) already constructs inline today, not a
+new content decision. Spec 09's harder, genuinely per-title judgment
+calls (moving education to the bottom, adding a summary section) are
+deliberately not decided here: nothing available grounds asserting any
+of the 3 profiles needs the exception, and the one summary trigger
+otherwise relevant to this user (visa/sponsorship) is already covered by
+the contact block's work-authorization line per spec 09 itself.
+Confirmed by asking (this session's plan review) rather than guessed;
+revisit per-profile at E2 time, when a human is looking at a real
+generated resume against a real target title.
+
+**`keyword_corpus` empty-corpus fallback** (`profiles/brief.py`'s
+`_top_corpus_keywords()`): falls back to `bank.keyword_counts()` (an
+already-existing function, already used by `measure.coverage()`/
+`missing_keywords()`) restricted to `measure.select_for_profile(bank,
+profile)`'s output, `Counter.most_common(limit)`. The brief output
+labels which source produced the list explicitly, so a future E2 session
+never mistakes bank-frequency for real market-corpus data. Corrected in
+conversation before implementation: the user's initial framing attributed
+this gap to C4 (relevance pre-filter) and cited "the same stand-in D1
+used for R002" as precedent; neither holds up. `keyword_corpus` is empty
+because no daily orchestrator has ever called
+`pipeline.extract.analyze_job()` (C3's own output) against real jobs, a
+gap already flagged under C3 in PROGRESS.md's Known Issues, unrelated to
+C4. And D1 built no bank-frequency stand-in for R002 specifically — R002
+has no fallback at all (D28), real PDF geometry only. Checked before
+citing either claim as justification for the design, not assumed.
+
+**`gap_ledger` empty-ledger fallback**: renders an explicit "P4 is not
+built and no orchestrator has run the patch ladder against real jobs
+yet" line rather than a silently blank section. Structurally distinct
+from the corpus case, not the same caveat twice: `gap_ledger` cannot
+have real rows yet regardless of C3/C4, since nothing writes to it until
+P4 exists (deliberately not built, see D4/PROGRESS.md) and something
+calls `run_ladder()` against real jobs.
+
+**"Current base resume's rubric measurements" with no `base_resumes`
+row yet**: confirmed by asking (AskUserQuestion during this session's
+plan review) to render+score `measure.select_for_profile(bank, profile)`
+on the fly, exactly the unpatched-candidate shape D1's own grounding
+scored, explicitly labeled in the brief output as the on-the-fly
+candidate, not a real generated base resume. Scored against the brief's
+own top-keywords list (corpus or bank-frequency fallback) as
+`required_keywords`: there is no job-specific keyword list at profile
+granularity, so the market's own top keywords are the only defensible
+thing to measure coverage/front-load against here, a forced choice
+rather than an arbitrary one, and it ties the brief's own two sections
+together meaningfully (a real live run against `ai_ml_engineer`,
+2026-08-05, scored `coverage: 1.0` for exactly this reason: with the
+bank-frequency fallback active, the required keywords are by
+construction already present in the candidate that carries them).
+
+**Live-verified, not just unit-tested**, per this project's standing
+grounding norm: `uv run python -m jobengine.profiles brief --profile
+{ai_ml_engineer,software_engineer,data_scientist}` against the real
+`data/jobengine.db` (read-only, confirmed unchanged before/after:
+`keyword_corpus`/`gap_ledger` still 0 rows, `jobs` still 3882,
+`companies` still 15) and real `resume/bank/aankit.yaml` all three
+produced real, non-empty markdown: real rubric numbers in the
+measurements section (`ai_ml_engineer`: `score 63.27`, `hard_failures:
+['R002']`, `front_load 0.5`, `pages 3`) and honest degradation text for
+both empty tables, not a crash or a blank brief.
+
+**Not built this session, by explicit scope**: `patch.py`'s
+`run_ladder()` and the two render scripts still construct
+`RenderProfile` inline rather than loading `config/profiles.yaml`
+through the new registry; migrating them wasn't asked for. No CLI
+(`__main__.py`) unit test was written either, matching this codebase's
+existing convention: no other module's CLI (`bank.py`,
+`rubric/__main__.py`) has one, every `main()`/`_cmd_*` here is only ever
+exercised by a live manual run, matched rather than introducing a new,
+unprecedented pattern for this one module alone.
+
+---
+
+**D32. `ai_ml_engineer`'s base resume ships with R002 as a known,
+documented soft-fail (front_load 0.50, needs 0.75), not silently
+accepted and not blocked on.**
+
+The first real edit ever made to the hand-authored `resume/bank/
+aankit.yaml` (three bullets on `role_bantrly`: `b_bantrly_02`,
+`b_bantrly_03`, `b_bantrly_04`, tightened for length while preserving
+every fact and every already-tagged keyword) is now live: `bank
+validate` reports 0 errors/0 warnings, and `uv run python -m
+jobengine.profiles brief --profile ai_ml_engineer` against the real,
+edited bank confirms `score 63.40` (up from 63.27), `hard_failures:
+['R002']` only (`R003`/`R013` already passed before this edit and still
+do), `coverage: 1.0`, `front_load: 0.50`, `pages: 3`.
+
+**The gap was investigated exhaustively before concluding it should
+ship as-is, not assumed unfixable.** Live-tested, real-scored (D1's
+actual `rules.score_resume()`, not an estimate), against the real bank:
+(1) the automatic `run_ladder()` P0-P2 tiers, which left `front_load`
+completely unchanged (0.50 -> 0.50) — traced to two separate causes:
+`apply_p0`'s role-swap only fires when the later role's aggregate
+keyword score beats the earlier one's (`role_bantrly`: 16 vs.
+`role_utd_researcher`: 3, so it correctly declines by its own
+optimization goal), and `apply_p2` grabs the *first* role matching a
+not-yet-front-loaded keyword stem in bank order, hits the non-promotable
+`role_utd_researcher` first, and stops there by design, never reaching
+the genuinely-promotable project roles. (2) Three manual structural
+overrides (promoting `role_utd_researcher` ahead of `role_bantrly`,
+legal under R009's date-overlap tolerance; promoting the `projects`
+section ahead of `work_history`; both combined) — all three real-scored
+*worse* than baseline (0.20 each), because `front_load` is a fixed-space
+allocation over a fixed top-half-of-page-1 budget, not a rank order:
+every reorder only redistributes which keywords occupy that space, none
+create more of it, on a 3-page candidate with more required-keyword
+content than fits in half a page. (3) Two content-cut candidates
+(dropping `role_ju` entirely: a genuine no-op, 0.50 -> 0.50, since that
+role's content was already rendering past page 1 regardless of
+position; trimming `role_bantrly` to summary+2 bullets: a real gain to
+0.60, but at the cost of `embeddings`, previously passing). (4) A
+genuinely fact-preserving line-count trim of `role_bantrly`'s three
+non-top-10-keyword bullets (the edit now shipped) recovered only ~18pt
+of the ~75pt `cosmology` needed (`y=471.0 -> 452.9`) and the ~21pt still
+separating `machine learning` even after that same 18pt gain
+(`y=434.7 -> 416.6`), confirmed via the real renderer, not estimated
+from character counts. A synthetic, explicitly-not-real-content probe
+(prefix-truncating those same three bullets to incomplete sentences)
+did cross 0.70, proving the geometry math was sound, but also proving
+the honest gap: closing it for real requires cutting actual content,
+not just tightening it.
+
+**Every tested path to 0.75 costs more than it's worth, and none was
+applied.** The two structural promotions net-lose keywords (0.20 vs.
+0.50 baseline). The role-bantrly-to-3-bullets cut nets +1 keyword but
+sacrifices `embeddings`. Only the shipped tightening is a clean,
+zero-cost win (+small score bump, +2 lines of headroom, zero keywords
+lost) — it just isn't, on its own, enough to cross the threshold. No
+further cut was applied without being asked; that's a real content
+decision (what to drop), not a mechanical one, and belongs to a human
+call, not an automated one, same as D3/D4's own repeated confirmations
+before touching selection or content.
+
+**This mirrors C3's D27 ship-decision directly, not a new precedent.**
+Per hard rule 11, the rubric is deterministic and directional pressure
+toward a better resume, not a pass/fail gate a resume must clear before
+it can be used: `R001`'s coverage (1.0) is the rule spec 09's own DoD
+cites as the real bar ("coverage above 0.80"), comfortably cleared.
+`R002`'s specific 0.75 front-load threshold is a proxy for "does a
+skimming recruiter see the right keywords fast," not a hard requirement
+this resume is unusable without. The score/hard-failure state travels
+with every job this resume gets attached to via the review queue (per
+spec 09 and Phase F's design), so this soft-fail is visible at the
+point someone chooses to send it, not buried. Revisit only if real
+application outcomes (once F1's review queue and outcome tracking exist)
+show R002 specifically correlating with worse response rates for this
+profile, the same evidence bar D27 itself set, not a preemptive
+guess.

@@ -12,7 +12,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pdfplumber
 from pydantic import BaseModel
 
 from jobengine.resume import slop_lint
@@ -229,7 +228,7 @@ def score_resume(
     ]
     hard_failures = [d.rule for d in deficits]
 
-    page_count = _pdf_page_count(pdf_path)
+    page_count = measure.page_count(pdf_path)
     weighted_score = score.compute_score(
         bank=bank,
         required_keywords=required_keywords,
@@ -249,8 +248,3 @@ def score_resume(
             "pages": page_count,
         },
     )
-
-
-def _pdf_page_count(pdf_path: Path) -> int:
-    with pdfplumber.open(pdf_path) as pdf:
-        return len(pdf.pages)

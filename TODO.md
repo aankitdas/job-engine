@@ -197,18 +197,153 @@ Snapshot history cannot be backfilled.
   geometry against a real converted PDF. This exact DoD command was
   re-run live at checkpoint time and passes; see D28 in
   docs/decisions.md for the full reasoning and why this is flagged
-  explicitly rather than silently checked off.)
+  explicitly rather than silently checked off.
+  **Follow-up caught after the first checkpoint, not at initial
+  absorption:** spec 08 also explicitly requires "cache the extraction
+  per rendered file hash so repeated scoring is free," which the first
+  pass of D1 did not implement — every bullet's line-count call was
+  independently re-opening and re-parsing the whole PDF via pdfplumber
+  (15+ full re-parses per `score_resume()` call on the real bank). Fixed:
+  `measure.py`'s `_parsed_pdf()` now parses each PDF exactly once per
+  process, keyed by a sha256 of its own bytes (not its path, so two paths
+  with byte-identical content share a cache entry, matching spec 08's
+  Storage-section dedup), with all of `front_load()`/`front_load_detail()`
+  /`line_count_from_pdf()`/`page1_height()`/the new `page_count()` routed
+  through it. Verified via a real, non-mocked run: `pdfplumber.open` call
+  count for one full `score_resume()` against the real bank dropped from
+  2 to 1, identical scoring output before and after (same score, same
+  coverage/front_load numbers), confirming the cache changed performance
+  only, not correctness. 2 new tests in `tests/test_rubric.py`.)
 
-- [ ] **D3. Patch ladder P0-P2** (deterministic only)
+- [x] **D3. Patch ladder P0-P2** (deterministic only)
   Done: at least one real deficit closes with zero model calls.
+  (Done: `src/jobengine/rubric/patch.py` (`apply_p0`/`apply_p1`/`apply_p2`/
+  `run_ladder`) plus a CLI (`uv run python -m jobengine.rubric patch --job
+  <id> --dry-run`). No persistence to `job_resume_variants`: its
+  `base_resume_id` is a hard FK to `base_resumes`, empty until E2 runs
+  (Phase E, after Phase D in TODO.md's own ordering); `run_ladder()`
+  returns a `PatchResult`, wiring it to real storage is later work.
+  **Confirmed done via a real, measured deficit closing, not a synthetic
+  fixture alone:** required_keywords=["Chroma DB"] (a real bank tag, on a
+  real bullet in `role_docintel`) scored `R002` FAIL (front_load 0.00 <
+  0.75, the keyword is genuinely covered but lives in the Projects
+  section, which renders after Work History) before the ladder; after
+  P0/P1/P2 ran through the real render→PDF→pdfplumber→score_resume
+  pipeline, P2 promoted `"projects"` to the front of `section_order` and
+  `R002` flipped to PASS (front_load 1.0), `hard_failures` empty. Zero
+  model calls throughout.
+  **Two significant, real findings from grounding against 9 live-
+  extracted real job postings (both profiles, explicitly searched for
+  topical overlap with the bank's own content) before landing on the
+  Chroma DB case, not assumed going in:** (1) P1 (swap) is structurally
+  a no-op against the *current* bank for *any* job: `select_for_profile()`
+  already includes every profile-tagged bullet in a role, so there is
+  never a "selected vs. eligible-but-unselected" distinction within a
+  role for P1 to exploit, given today's bank sizes are all within R003's
+  3-8 range (except `role_utd_researcher`'s `software_engineer` tagging,
+  a separate known content gap, see Known Issues). (2) None of the 9 real
+  jobs tried closed via P0 either, because `role_bantrly` (the only role
+  whose content plausibly reaches page-1's top half) already has its own
+  bullets in a reasonable order for the specific keywords those 9 postings
+  happened to require; P0 did visibly reorder bullets in `role_docintel`
+  for one real job, but that role is deep enough in the document (page
+  2-3) that the reorder couldn't affect R002 either way. See D28 addendum
+  5 in docs/decisions.md for the full writeup, including why the R009
+  loosening (date-overlap tolerance, needed for P0's role-swap logic) was
+  itself confirmed by asking before being applied to the already-shipped
+  D1 rule.
+  `tests/test_patch.py`: 14 tests, written before implementation per hard
+  rule 7, one per tier's specific behavior plus 2 full real-bank
+  `run_ladder` integration tests. Full suite 258/258, ruff clean.)
 
-- [ ] **D4. Patch tier P3 + bank variant writeback**
+- [x] **D4. Patch tier P3 + bank variant writeback**
   Done: a P3 rephrase passes the linter, keeps its parent bank id, and is
   written back as a variant.
+  (Done: `src/jobengine/rubric/patch.py` gains `call_rephrase()` (the only
+  LLM call, via `router.get_provider("rephrase", ...)`, input strictly
+  the bullet's what/how/result + target keywords, never the whole bank or
+  the JD), `validate_rewrite()` (CLAUDE.md hard rule 12 enforced in code:
+  a general capitalized/digit-token check against the parent's what/how/
+  result + identity.toml, deliberately stricter than a jargon-allowlist
+  approach so a genuinely novel fabrication is caught, not just a
+  previously-seen one), `apply_p3()` (selects the bullet with the most
+  room, prefers an existing variant over a new call, max 2 new LLM calls
+  per job, discards on any guard/R005/R006(char-estimate)/R007/R008/
+  slop-linter failure), and `apply_variants_to_bank()` (pure, in-memory
+  writeback with `used_count` tracking). New in `bank.py`: `BulletVariant`
+  model, `Bullet.variants` field, `dump_bank()` (YAML serializer, tested
+  via round-trip only). `tests/test_bank.py`/`test_patch.py` gained 6 + 22
+  tests respectively, all written before implementation per hard rule 7,
+  including an extensive battery specifically targeting the traceability
+  guard (novel proper noun, novel number, already-tagged keyword,
+  described-but-untagged keyword, fabricated keyword, sentence-initial
+  capitalization, case-insensitivity), per explicit request that this
+  guard be airtight, not just happy-path tested.
+  **Confirmed via 3 real, live-Ollama runs (not mocked), per the user's
+  explicit request that the common path (P0-P2 fail, P3 must genuinely
+  rephrase) be grounded against real data, not a synthetic P3-only
+  fixture:** (1) a real job (Robinhood "Machine Learning Engineer",
+  job_id 318, whose deficit D3 already confirmed P0-P2 cannot close) —
+  the real model, asked to incorporate SQL/XGBoost, correctly declined to
+  fabricate either, returning `keywords_added: []`; (2)
+  `required_keywords=["CMB"]`, a real term genuinely present in a real
+  bullet's `what` field but untagged: the real model correctly surfaced
+  it as a new keyword, verified traceable, R001 deficit closed for real
+  (coverage 0.0 -> 1.0). A real bug was found via run (2), not by this
+  session's own synthetic tests: the first version only updated a
+  bullet's rewritten text, never merged `keywords_added` into
+  `.keywords`, so an accepted rewrite could never actually improve
+  coverage. Fixed (`_with_bullet_rewrite`, merges stem-deduplicated
+  keywords into the transient candidate only, never the canonical bank),
+  re-verified live against the exact same CMB reproduction case after the
+  fix (coverage 0.0 -> 1.0 again, via a real `run_ladder()` call). The
+  user then asked, specifically, whether this was checked in the
+  *persisted* bank state or only in `run_ladder`'s in-memory return
+  value — it had only been the latter; the full chain (accept ->
+  `apply_variants_to_bank` -> `dump_bank` -> `load_bank` -> a second,
+  independent `run_ladder()` call against the reloaded bank -> reuses the
+  variant with zero new LLM calls -> coverage still 1.0 -> `used_count`
+  1->2) was then run live, for real, on the same reproduction case, and
+  passed. A permanent regression test
+  (`test_accepted_p3_rewrite_survives_persist_reload_and_is_reused_with_coverage_intact`,
+  exercising `apply_p3()` directly rather than the full render/PDF
+  pipeline, for speed) was added afterward so this chain, not just its
+  individual pieces, stays covered by the automated suite. See D30 in
+  docs/decisions.md for the full writeup,
+  including why the real resume/bank/aankit.yaml is never written to
+  automatically (confirmed by asking; `apply_variants_to_bank()`/
+  `dump_bank()` are built and tested
+  against tmp_path copies only). Full suite 300/300, ruff clean. P4
+  (accept and log to gap_ledger) remains not built, deliberately: it only
+  fires after P3's budget is exhausted, and "soft deficit" is a product
+  judgment call not made without asking.)
 
 ## Phase E: Base resumes
 
-- [ ] **E1. Profile config + `profiles brief`** (`specs/09-base-resumes.md`)
+- [x] **E1. Profile config + `profiles brief`** (`specs/09-base-resumes.md`)
+  (Done: `config/profiles.yaml` + `src/jobengine/profiles/config.py`
+  (`ProfileConfig`, `load_profile_config()`, `to_render_profile()`) is
+  the profile registry `render.py`'s own `RenderProfile` docstring named
+  as E1's job ("Stand-in for E1's not-yet-built profile registry"); all
+  3 profiles ship with the same flat section order and no summary
+  section, matching what every existing `RenderProfile` call site
+  already builds inline today, not a new content decision (spec 09's
+  harder per-title judgment calls are deliberately deferred to E2).
+  `src/jobengine/profiles/brief.py`'s `generate_brief()` (CLI: `uv run
+  python -m jobengine.profiles brief --profile <id>`) produces spec 09's
+  brief.md: top corpus keywords (falls back to
+  `bank.keyword_counts()` restricted to the profile when `keyword_corpus`
+  has no rows, clearly labeled), the current unpatched candidate's
+  rubric measurements (`measure.select_for_profile()` rendered+scored on
+  the fly, confirmed by asking since no `base_resumes` row exists yet),
+  uncovered gap-ledger keywords (explicit "P4 not built" text when
+  `gap_ledger` is empty, which it structurally must be until P4 exists),
+  and unselected bank bullets carrying top keywords. "Rank change since
+  last generation" and the market "diff summary" are out of scope, per
+  explicit user direction: nothing to diff against on this first-ever
+  brief. Live-verified against the real db (confirmed read-only,
+  unchanged) and real bank for all 3 profiles, not just unit-tested; see
+  D31 in docs/decisions.md.)
 - [ ] **E2. Generate all 3 base resumes** (interactive session, not automated)
   Done: each passes the full rubric at coverage >= 0.80.
 

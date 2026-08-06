@@ -8,6 +8,7 @@ docs/decisions.md), and that only holds if this module stays deterministic.
 
 from __future__ import annotations
 
+import hashlib
 import re
 import zipfile
 from pathlib import Path
@@ -92,9 +93,56 @@ def _tokenize(text: str) -> list[str]:
     return _TOKEN_RE.findall(text.lower())
 
 
-def page1_height(pdf_path: Path) -> float:
+class _ParsedPage(NamedTuple):
+    height: float
+    tokens: list[tuple[str, float]]  # (token, top), reading order
+
+
+_MAX_CACHE_ENTRIES = 32
+_PAGE_CACHE: dict[str, list[_ParsedPage]] = {}
+
+
+def _parsed_pdf(pdf_path: Path) -> list[_ParsedPage]:
+    """Spec 08: "Cache the extraction per rendered file hash so repeated
+    scoring is free." Keyed by a sha256 of the PDF's own bytes, not the
+    path, so two paths pointing at byte-identical content (e.g. spec 08's
+    Storage section dedup, "two jobs whose patches produce identical
+    selections share one rendered file") hit the same cache entry. Every
+    other function in this module that needs PDF geometry goes through
+    this one parse, rather than each opening and re-parsing the file
+    independently. Bounded at _MAX_CACHE_ENTRIES with simple oldest-in
+    eviction, not a true LRU: this process scores a bounded number of
+    distinct resumes per run, not an unbounded long-lived cache, so a
+    precise LRU isn't worth the extra code."""
+    file_hash = hashlib.sha256(pdf_path.read_bytes()).hexdigest()
+    cached = _PAGE_CACHE.get(file_hash)
+    if cached is not None:
+        return cached
+
     with pdfplumber.open(pdf_path) as pdf:
-        return pdf.pages[0].height
+        pages = []
+        for page in pdf.pages:
+            words = sorted(
+                page.extract_words(), key=lambda w: (round(w["top"], 1), w["x0"])
+            )
+            flat: list[tuple[str, float]] = []
+            for w in words:
+                for token in _tokenize(w["text"]):
+                    flat.append((token, w["top"]))
+            pages.append(_ParsedPage(height=page.height, tokens=flat))
+
+    if len(_PAGE_CACHE) >= _MAX_CACHE_ENTRIES:
+        _PAGE_CACHE.pop(next(iter(_PAGE_CACHE)))
+    _PAGE_CACHE[file_hash] = pages
+    return pages
+
+
+def page1_height(pdf_path: Path) -> float:
+    return _parsed_pdf(pdf_path)[0].height
+
+
+def page_count(pdf_path: Path) -> int:
+    return len(_parsed_pdf(pdf_path))
 
 
 class KeywordOccurrence(NamedTuple):
@@ -113,25 +161,19 @@ def front_load_detail(pdf_path: Path, keywords: list[str]) -> list[KeywordOccurr
     if not top10:
         return []
 
-    with pdfplumber.open(pdf_path) as pdf:
-        page = pdf.pages[0]
-        half = page.height / 2
-        words = sorted(page.extract_words(), key=lambda w: (round(w["top"], 1), w["x0"]))
-        flat: list[tuple[str, float]] = []
-        for w in words:
-            for token in _tokenize(w["text"]):
-                flat.append((token, w["top"]))
+    page1 = _parsed_pdf(pdf_path)[0]
+    half = page1.height / 2
 
-        occurrences = []
-        for kw in top10:
-            kw_tokens = _tokenize(kw)
-            if not kw_tokens:
-                occurrences.append(KeywordOccurrence(kw, None, False))
-                continue
-            first_top = _first_occurrence_top(flat, kw_tokens)
-            above = first_top is not None and first_top < half
-            occurrences.append(KeywordOccurrence(kw, first_top, above))
-        return occurrences
+    occurrences = []
+    for kw in top10:
+        kw_tokens = _tokenize(kw)
+        if not kw_tokens:
+            occurrences.append(KeywordOccurrence(kw, None, False))
+            continue
+        first_top = _first_occurrence_top(page1.tokens, kw_tokens)
+        above = first_top is not None and first_top < half
+        occurrences.append(KeywordOccurrence(kw, first_top, above))
+    return occurrences
 
 
 def front_load(pdf_path: Path, keywords: list[str]) -> float:
@@ -165,24 +207,16 @@ def line_count_from_pdf(pdf_path: Path, bullet_text: str) -> int:
     if not target_tokens:
         return 0
 
-    with pdfplumber.open(pdf_path) as pdf:
-        for page in pdf.pages:
-            words = sorted(
-                page.extract_words(), key=lambda w: (round(w["top"], 1), w["x0"])
-            )
-            flat: list[tuple[str, float]] = []
-            for w in words:
-                for token in _tokenize(w["text"]):
-                    flat.append((token, w["top"]))
-
-            window = min(6, len(target_tokens))
-            for i in range(len(flat) - window + 1):
-                if [flat[i + j][0] for j in range(window)] == target_tokens[:window]:
-                    span = flat[i : i + len(target_tokens)]
-                    if len(span) < len(target_tokens):
-                        continue
-                    tops = {round(top, 1) for _, top in span}
-                    return len(tops)
+    for page in _parsed_pdf(pdf_path):
+        flat = page.tokens
+        window = min(6, len(target_tokens))
+        for i in range(len(flat) - window + 1):
+            if [flat[i + j][0] for j in range(window)] == target_tokens[:window]:
+                span = flat[i : i + len(target_tokens)]
+                if len(span) < len(target_tokens):
+                    continue
+                tops = {round(top, 1) for _, top in span}
+                return len(tops)
 
     raise ValueError(f"bullet text not found in {pdf_path}: {bullet_text[:60]!r}")
 
@@ -262,13 +296,47 @@ def has_first_person_pronoun(text: str) -> bool:
     return _PRONOUN_RE.search(text) is not None
 
 
+_ONGOING_SENTINEL = "9999-12"  # lexically sorts after any real YYYY-MM date
+
+
+def role_end_or_ongoing(role: Role) -> str:
+    """The role's end date, or a sentinel that sorts after any real
+    YYYY-MM date, for date-range comparisons that treat an ongoing role
+    (end=None) as extending to the present. Public so patch.py's P0 can
+    use the exact same "ongoing" convention R009 itself uses."""
+    return role.end or _ONGOING_SENTINEL
+
+
+def roles_date_overlap(a: Role, b: Role) -> bool:
+    """True if a and b's [start, end] ranges genuinely overlap. Used by
+    P0 to decide which adjacent role pairs it's allowed to swap without
+    ever breaking R009 (see is_reverse_chronological's own docstring)."""
+    a_end = role_end_or_ongoing(a)
+    b_end = role_end_or_ongoing(b)
+    return not (a_end < b.start or b_end < a.start)
+
+
 def is_reverse_chronological(roles: list[Role]) -> bool:
     """R009: non-project roles only, projects have no chronological
     constraint per the patch ladder's P2 section. A role with no start date
     (shouldn't happen for a non-project role per the bank schema, but not
-    assumed) is skipped rather than crashing the comparison."""
-    starts = [r.start for r in roles if r.kind != "project" and r.start is not None]
-    return all(starts[i] >= starts[i + 1] for i in range(len(starts) - 1))
+    assumed) is skipped rather than crashing the comparison.
+
+    A violation is a role appearing before an earlier, non-overlapping
+    role, not merely a different start date: two roles with genuinely
+    overlapping date ranges (real example: role_sei 2021-10 to 2023-08
+    overlaps role_unl 2021-05 to 2023-06) may appear in either order
+    without failing R009, matching the natural meaning of "concurrent" in
+    resume-writing and what P0's patch-ladder tier is allowed to reorder
+    without ever breaking this rule. Confirmed by asking, since the
+    original stricter (start-date-monotonic) check would have made P0's
+    own "sort roles only if two are concurrent" permission inert on every
+    pair in the real bank."""
+    ordered = [r for r in roles if r.kind != "project" and r.start is not None]
+    for i in range(len(ordered) - 1):
+        if role_end_or_ongoing(ordered[i]) < ordered[i + 1].start:
+            return False
+    return True
 
 
 def speculative_entry_ids(bank: Bank) -> list[str]:

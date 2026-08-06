@@ -4,12 +4,15 @@ import pytest
 
 from jobengine.db.migrate import connect, init
 from jobengine.db.models import (
+    BaseResume,
     Company,
     Job,
     Outcome,
     get_company,
     get_job,
+    insert_base_resume,
     insert_outcome,
+    latest_base_resume_version,
     upsert_company,
     upsert_job,
 )
@@ -246,3 +249,68 @@ def test_outcomes_are_append_only(conn_with_company):
         )
     with pytest.raises(sqlite3.IntegrityError):
         conn.execute("DELETE FROM outcomes WHERE id = ?", (outcome_id,))
+
+
+def _base_resume(profile="ai_ml_engineer", version=1, **overrides):
+    fields = {
+        "profile": profile,
+        "version": version,
+        "selection": "[]",
+        "section_order": "[]",
+        "docx_path": "resume/base/ai_ml_engineer/v1/resume.docx",
+        "pdf_path": "resume/base/ai_ml_engineer/v1/resume.pdf",
+        "rubric": "{}",
+        "generated_at": "2026-08-06T00:00:00+00:00",
+    }
+    fields.update(overrides)
+    return BaseResume(**fields)
+
+
+def test_insert_base_resume_inserts_and_returns_id(conn):
+    resume_id = insert_base_resume(conn, _base_resume())
+    row = conn.execute(
+        "SELECT profile, version, docx_path FROM base_resumes WHERE id = ?",
+        (resume_id,),
+    ).fetchone()
+    assert row["profile"] == "ai_ml_engineer"
+    assert row["version"] == 1
+    assert row["docx_path"] == "resume/base/ai_ml_engineer/v1/resume.docx"
+
+
+def test_latest_base_resume_version_returns_0_when_none_exist(conn):
+    assert latest_base_resume_version(conn, "ai_ml_engineer") == 0
+
+
+def test_latest_base_resume_version_returns_max_version_for_profile(conn):
+    insert_base_resume(conn, _base_resume(profile="ai_ml_engineer", version=1))
+    insert_base_resume(conn, _base_resume(profile="ai_ml_engineer", version=2))
+    insert_base_resume(conn, _base_resume(profile="data_scientist", version=1))
+    assert latest_base_resume_version(conn, "ai_ml_engineer") == 2
+    assert latest_base_resume_version(conn, "data_scientist") == 1
+    assert latest_base_resume_version(conn, "software_engineer") == 0
+
+
+def test_base_resumes_row_satisfies_job_resume_variants_fk(conn_with_company):
+    conn = conn_with_company
+    resume_id = insert_base_resume(conn, _base_resume())
+    job_id = upsert_job(
+        conn,
+        Job(
+            ats="greenhouse",
+            company_slug="acme",
+            ats_job_id="999",
+            title="ML Engineer",
+            first_seen_at="2026-08-06T00:00:00+00:00",
+            last_seen_at="2026-08-06T00:00:00+00:00",
+        ),
+    )
+    conn.execute(
+        "INSERT INTO job_resume_variants "
+        "(job_id, profile, base_resume_id, selection_hash, created_at) "
+        "VALUES (?, 'ai_ml_engineer', ?, 'hash', '2026-08-06T00:00:00+00:00')",
+        (job_id, resume_id),
+    )
+    row = conn.execute(
+        "SELECT base_resume_id FROM job_resume_variants WHERE job_id = ?", (job_id,)
+    ).fetchone()
+    assert row["base_resume_id"] == resume_id

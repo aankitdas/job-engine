@@ -50,9 +50,11 @@ IRREGULAR_PAST_TENSE_VERBS = {
     "brought",
 }
 
-_CHARS_PER_LINE = 105
-_MAX_LINES = 3
-_WARN_CHAR_LIMIT = _CHARS_PER_LINE * _MAX_LINES  # 315, rule 7
+# Public because rubric/patch.py's P3 rewrite gate (D4) reuses the same
+# char-based line estimate rather than a second hardcoded copy.
+CHARS_PER_LINE = 105
+MAX_LINES = 3
+WARN_CHAR_LIMIT = CHARS_PER_LINE * MAX_LINES  # 315, rule 7
 
 BulletStatus = Literal["verified", "speculative"]
 RoleKind = Literal["full_time", "internship", "research", "project"]
@@ -87,6 +89,19 @@ class SummaryBullet(BaseModel):
     status: BulletStatus
 
 
+class BulletVariant(BaseModel):
+    """A P3 rephrase (specs/08-rubric.md's patch ladder) that passed
+    every gate and was accepted for some job. The canonical `text` above
+    never changes; a variant is an alternate phrasing kept alongside it.
+    `used_count` increments each time a job's selector picks this
+    variant's text over generating a new rewrite."""
+
+    text: str
+    keywords_added: list[str] = []
+    created_at: str
+    used_count: int = 0
+
+
 class Bullet(BaseModel):
     id: str
     status: BulletStatus
@@ -97,6 +112,7 @@ class Bullet(BaseModel):
     keywords: list[str] = []
     evidence: str | None = None
     profiles: list[str] = []
+    variants: list[BulletVariant] = []
 
 
 class Role(BaseModel):
@@ -140,6 +156,21 @@ class Bank(BaseModel):
 def load_bank(path: Path = DEFAULT_BANK_PATH) -> Bank:
     raw = yaml.safe_load(path.read_text())
     return Bank.model_validate(raw)
+
+
+def dump_bank(bank: Bank, path: Path) -> None:
+    """Serializes bank to YAML at path. A data-fidelity guarantee only
+    (load -> dump -> reload round-trips to a pydantic-equal Bank), not a
+    formatting-fidelity one: `sort_keys=False` preserves each model's
+    field-declaration order, but a generic dumper will not reproduce a
+    hand-authored file's exact original style byte-for-byte. Nothing in
+    this codebase calls this against the real resume/bank/aankit.yaml
+    yet; confirmed by asking not to build that wiring in D4 (see D30 in
+    docs/decisions.md), since aankit.yaml was hand-authored (A2) and a
+    surprising reformat would drown a real content change in noise a
+    human reviewer would have to wade through."""
+    data = bank.model_dump(mode="json", exclude_defaults=False)
+    path.write_text(yaml.dump(data, sort_keys=False, allow_unicode=True, width=100))
 
 
 @dataclass(frozen=True)
@@ -271,12 +302,12 @@ def _check_text_rules(entity_id: str, text: str, report: Report) -> None:
         report.errors.append(
             Issue("R6", entity_id, "text does not appear to open in past tense")
         )
-    if len(text) > _WARN_CHAR_LIMIT:
+    if len(text) > WARN_CHAR_LIMIT:
         report.warnings.append(
             Issue(
                 "R7",
                 entity_id,
-                f"text is {len(text)} chars, estimated over {_MAX_LINES} lines",
+                f"text is {len(text)} chars, estimated over {MAX_LINES} lines",
             )
         )
 

@@ -179,6 +179,63 @@ def test_r002_front_load_measures_real_pdf_geometry(real_sample_pdf):
     assert 0.0 <= ratio <= 1.0
 
 
+def test_pdf_parsing_is_cached_per_file_hash_not_reparsed_every_call(
+    real_sample_pdf, monkeypatch
+):
+    """Spec 08: "Cache the extraction per rendered file hash so repeated
+    scoring is free." front_load/front_load_detail/line_count_from_pdf/
+    page1_height must all share one parse of a given PDF, not each open
+    and re-parse it independently."""
+    import pdfplumber
+
+    measure._PAGE_CACHE.clear()
+    real_open = pdfplumber.open
+    open_calls = []
+
+    def _counting_open(*args, **kwargs):
+        open_calls.append(args)
+        return real_open(*args, **kwargs)
+
+    monkeypatch.setattr(pdfplumber, "open", _counting_open)
+
+    bank = load_bank()
+    real_summary_text = bank.roles[0].summary.text
+
+    measure.page1_height(real_sample_pdf)
+    measure.front_load(real_sample_pdf, ["Python", "LLM"])
+    measure.line_count_from_pdf(real_sample_pdf, real_summary_text)
+
+    assert len(open_calls) == 1
+
+
+def test_pdf_parsing_cache_is_keyed_by_content_not_path(
+    real_sample_pdf, tmp_path, monkeypatch
+):
+    """Two different paths with byte-identical PDF content share one cache
+    entry, matching spec 08's "per rendered file hash" wording rather than
+    "per path" (relevant once job_resume_variants dedups identical
+    selections onto one rendered file per spec 08's Storage section)."""
+    import pdfplumber
+
+    measure._PAGE_CACHE.clear()
+    duplicate_path = tmp_path / "duplicate.pdf"
+    duplicate_path.write_bytes(real_sample_pdf.read_bytes())
+
+    real_open = pdfplumber.open
+    open_calls = []
+
+    def _counting_open(*args, **kwargs):
+        open_calls.append(args)
+        return real_open(*args, **kwargs)
+
+    monkeypatch.setattr(pdfplumber, "open", _counting_open)
+
+    measure.page1_height(real_sample_pdf)
+    measure.page1_height(duplicate_path)
+
+    assert len(open_calls) == 1
+
+
 def test_r002_fails_below_threshold():
     result = rules.check_r002(front_load_ratio=0.5)
     assert result is not None
@@ -344,6 +401,24 @@ def test_r009_ignores_project_roles_with_no_dates():
     project = _role("r_proj", kind="project", start=None, end=None)
     bank = _bank([role_new, project])
     assert rules.check_r009(bank) is None
+
+
+def test_r009_tolerates_genuinely_overlapping_roles_in_either_order():
+    # role_sei/role_unl-style real data: 2021-10 to 2023-08 and 2021-05 to
+    # 2023-06 genuinely overlap despite different start dates. Neither
+    # order is a violation: R009 only flags a role appearing before an
+    # earlier, non-overlapping role, not any difference in start date.
+    role_a = _role("r_a", start="2021-10", end="2023-08")
+    role_b = _role("r_b", start="2021-05", end="2023-06")
+    assert rules.check_r009(_bank([role_a, role_b])) is None
+    assert rules.check_r009(_bank([role_b, role_a])) is None
+
+
+def test_r009_still_fails_non_overlapping_roles_in_wrong_order():
+    role_old = _role("r_old", start="2018-01", end="2019-01")
+    role_new = _role("r_new", start="2022-01", end="2023-01")
+    assert rules.check_r009(_bank([role_old, role_new])) is not None
+    assert rules.check_r009(_bank([role_new, role_old])) is None
 
 
 # ---------------------------------------------------------------------------

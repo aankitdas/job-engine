@@ -1,0 +1,35 @@
+# Profile registry. See specs/09-base-resumes.md's "Profile section order"
+# and render.py's RenderProfile docstring ("Stand-in for E1's not-yet-built
+# profile registry"). Loaded by src/jobengine/profiles/config.py.
+#
+# All 3 profiles currently default to the same flat section order and no
+# summary section, matching current de facto behavior everywhere else in
+# this codebase (patch.py's run_ladder(), scripts/render_sample.py,
+# scripts/render_pdf_sample.py all build an equivalent RenderProfile inline
+# today). Spec 09's harder calls, education moving to the bottom for a
+# specific title or a summary section being genuinely triggered, are
+# deliberately not decided here: nothing grounds asserting any of the 3
+# profiles need the exception yet, and the one summary trigger otherwise
+# relevant to this user (visa/sponsorship) is already covered by the
+# contact block's work-authorization line. Revisit per-profile at E2 time,
+# when a human is looking at a real generated resume against a real target
+# title, not blind here.
+
+profiles:
+  ai_ml_engineer:
+    display_name: "AI/ML Engineer"
+    section_order: ["work_history", "projects", "education", "publications"]
+    include_summary: false
+    summary_text: null
+
+  software_engineer:
+    display_name: "Software Engineer"
+    section_order: ["work_history", "projects", "education", "publications"]
+    include_summary: false
+    summary_text: null
+
+  data_scientist:
+    display_name: "Data Scientist"
+    section_order: ["work_history", "projects", "education", "publications"]
+    include_summary: false
+    summary_text: null
