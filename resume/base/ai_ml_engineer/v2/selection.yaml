@@ -1,0 +1,44 @@
+profile: ai_ml_engineer
+version: 2
+section_order:
+- work_history
+- projects
+- education
+- publications
+roles:
+- role_id: role_bantrly
+  bullet_ids:
+  - b_bantrly_01
+  - b_bantrly_02
+  - b_bantrly_03
+  - b_bantrly_04
+  - b_bantrly_05
+- role_id: role_utd_researcher
+  bullet_ids:
+  - b_utd_01
+  - b_utd_02
+  - b_utd_03
+  - b_utd_04
+  - b_utd_05
+- role_id: role_unl
+  bullet_ids:
+  - b_unl_01
+  - b_unl_02
+  - b_unl_03
+- role_id: role_ju
+  bullet_ids:
+  - b_ju_01
+  - b_ju_02
+- role_id: role_bantrly_lessongen
+  bullet_ids:
+  - b_lessongen_01
+  - b_lessongen_02
+  - b_lessongen_03
+  - b_lessongen_04
+  - b_lessongen_05
+- role_id: role_docintel
+  bullet_ids:
+  - b_docintel_01
+  - b_docintel_02
+  - b_docintel_04
+  - b_docintel_06

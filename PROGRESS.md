@@ -3,72 +3,112 @@
 **Claude Code: read this file at the start of every session and update it at
 the end via `/checkpoint`. Do not rely on memory of previous sessions.**
 
-Last updated: 2026-08-06
-Current task: E1 is **done** (see prior entry below and D31 in
-docs/decisions.md). E2 (generate all 3 base resumes) is **in progress,
-not done**: only `ai_ml_engineer` has a version so far
-(`resume/base/ai_ml_engineer/v1/`), `software_engineer`/`data_scientist`
-haven't started. Not checked off in TODO.md; E2's literal DoD ("each
-passes the full rubric at coverage >= 0.80") needs all 3, and this one
-version doesn't even clear its own rubric (`hard_failures: ['R002']`,
-shipped anyway as a documented soft-fail, see D32).
-This session did real E2 work end to end for `ai_ml_engineer`, not just
-scaffolding: (1) diagnosed R002's exact failure (which top keywords miss
-the page-1-top-half cutoff, their real y-coordinates, which bullet/
-summary carries each); (2) live-tested, real-scored (D1's actual
-`rules.score_resume()`) every mechanical fix the patch ladder offers —
-the automatic P0-P2 ladder (no-op, traced to two separate causes in its
-own logic), 3 manual structural reorders (all net *worse* than baseline,
-since front_load is a fixed-space allocation over a 3-page candidate,
-not a rank order reorders can create more of), and 2 content-cut
-variants (one a genuine no-op, one a real +1-keyword gain at the cost of
-another keyword); (3) drafted and verified 3 shortened bullets for
-`role_bantrly` (`b_bantrly_02/03/04`) against the real `validate_rewrite()`
-guard, real keyword-verbatim/D20-reliance checks, and real line counts,
-honestly confirming a fact-preserving trim recovers only ~18pt of the
-~75pt needed, not enough to pass; (4) applied those 3 edits for real to
-`resume/bank/aankit.yaml` — **the first-ever edit to that hand-authored
-file** — `bank validate`: 0 errors/0 warnings; (5) built
-`src/jobengine/profiles/persist.py` (`persist_base_resume()`, tests
-first per hard rule 7) plus `db/models.py`'s `BaseResume` model +
-`insert_base_resume()`/`latest_base_resume_version()` (also
-tests-first, mirroring `insert_model_eval`'s pattern) — **the
-first-ever write to `data/jobengine.db`'s `base_resumes` table**; (6)
-ran it for real: `resume/base/ai_ml_engineer/v1/` now has
-`selection.yaml`/`resume.docx`/`resume.pdf`/`rubric.json` (confirmed
-byte-size-identical, matching page-1 text, to the PDF the user had
-already visually reviewed) plus a hand-written `CHANGELOG.md`; the real
-`base_resumes` row (`id=1`) is committed; (7) verified
-`job_resume_variants.base_resume_id`'s FK against this new row on a
-scratch copy of the real db (inserted, confirmed `PRAGMA
-foreign_key_check` clean, discarded the copy — no fake data left in the
-real db).
-Every judgment call along the way was investigated and shown with real
-numbers before being decided, not asserted: the D23 misattribution (was
-about the B3 filter-survivor cap, not a keyword-verbatim convention;
-D20 is the actual precedent) was caught and corrected before drafting,
-same pattern as this session's own D30/D31 corrections.
-The whole investigation and the final ship decision (R002 soft-fail,
-mirrors C3's D27 precedent: the rubric is directional pressure, not a
-hard gate, visible via the review queue not hidden) are recorded as D32
-in docs/decisions.md.
-9 new tests this session (`tests/test_db.py` +4, `tests/
-test_profiles_persist.py` +5), written before implementation per hard
-rule 7; `uv run pytest` 328/328 (up from 319), `ruff check`/`format
---check` clean.
-Next: `software_engineer`/`data_scientist` still need their own E2
-sessions (each has its own R002/R003/R013 profile to work through, per
-the earlier diagnostic — `data_scientist` in particular has its own
-distinct R003 gap, `role_bantrly_lessongen=2`, not yet addressed). Needs
-your go-ahead before starting either, per the session protocol. P4
-(accept and log to gap_ledger) also remains deliberately unbuilt.
+Last updated: 2026-08-07
+Current task: **F1 (review queue) is done.** No dedicated spec file
+existed for it (TODO.md's own Rules section deferred writing Phase F
+specs until Phase D ran on real data; nobody had written one when this
+session started) — this session's Claude Code plan-mode plan, approved
+before any code was written, is F1's design document; see D35 in
+docs/decisions.md for the full writeup, only summarized here.
+Built `src/jobengine/queue/orchestrate.py` (`QueueContext`,
+`ensure_reviewed()`: lazily triggers C3 extraction + the D3/D4 patch
+ladder the first time a reviewer opens a specific (job, profile) pair,
+zero batch/cron orchestrator, `approve()`/`reject()`, `list_queue()`)
+and `src/jobengine/web/app.py` (FastAPI: `GET /`, `GET /jobs/{job_id}/
+{profile}`, `POST .../approve`, `POST .../reject`; Jinja2 templates;
+`uv run uvicorn jobengine.web.app:app --reload`, CLAUDE.md's
+already-documented dev command, now real). The lazy-trigger-not-batch
+scope was a genuine 3-way fork resolved via `AskUserQuestion` before any
+code: a real batch orchestrator would need C4 (relevance pre-filter,
+not built) for a proper survivor cut first.
+**Two real bugs found and fixed before/during implementation, not
+after shipping, each caught by verification, not assumed correct:**
+(1) the first-drafted design (from a planning sub-agent) tracked review
+state as `applications` rows, which would have silently corrupted B3's
+already-shipped `is_already_applied()` filter (it treats *any*
+`applications` row for a `job_id` as "already applied," regardless of
+`status`) — caught by reading that function directly before accepting
+the design, fixed by moving review state onto new `job_resume_variants.
+review_status`/`reviewed_at` columns instead, `applications` rows now
+created only on approval; (2) `job_resume_variants`' old
+`UNIQUE(base_resume_id, selection_hash)` constraint (no `job_id`) would
+have rejected a second job's insert outright if its patch ladder
+converged on an identical selection to an already-inserted job's row,
+contradicting spec 08's own multi-job file-reuse dedup intent — caught
+by a test written before implementation, fixed via a real schema change
+(`UNIQUE(job_id, profile)` instead) plus genuine table-rebuild migration
+logic in `migrate.py` (this project's first migration beyond idempotent
+`CREATE ... IF NOT EXISTS`, needed since removing a table-level
+constraint isn't expressible as one). A third bug (FastAPI running sync
+routes/`Depends()` in a threadpool, breaking `sqlite3`'s default
+same-thread requirement) was found only by running the real app, fixed
+via a new `check_same_thread` parameter on `connect()`, defaulted `True`
+everywhere except `jobengine.web.app`.
+**The real db migration was applied only after asking and getting
+explicit confirmation** (hard rule 13): `job_resume_variants` had 0 real
+rows at the time, so the rebuild copied nothing. Verified read-only
+afterward (new index present, old constraint gone, row counts
+unchanged, both schema versions recorded), then verified end to end
+against the real running app and real db using this session's own real
+worked example (job_id 3871, Airbnb "Software Engineer, Biztech Client
+and Identity", already confirmed to survive B3 for `software_engineer`):
+first visit ~22s (real Ollama cold start), on-screen numbers matched
+the plan's pre-computed worked example exactly (score 18.98, coverage
+0.14, `hard_failures: ['R001']`, all four patch tiers attempted);
+second visit 0.01s, byte-identical HTML, zero new model calls; reject
+returned 303, flipped `review_status`, created no `applications` row,
+and the job dropped off `GET /`. This is also the first-ever real
+`job_analysis`, `keyword_corpus`, `job_resume_variants`, and
+`rubric_results` rows this project has written to `data/jobengine.db`
+outside a scratch copy, closing gaps flagged since C3/E1 ("no daily
+orchestrator has ever called `analyze_job()` against real jobs").
+42 new tests, written before implementation per hard rule 7
+(`test_db.py` +12, `test_db_migrate.py` +9 new file,
+`test_queue_orchestrate.py` +7 new file, `test_web_app.py` +8 new
+file).
+**Follow-up in this same session, after F1's initial close:** added
+`passes_all_filters(conn, job, config) -> bool` to `pipeline/filter.py`
+(B3's full deterministic chain — title match, location, seniority,
+employment type, citizenship/clearance, already-applied — in one call,
+tests-first) and wired it into `web/app.py`'s `_new_pairs()`, replacing
+the title-only check the "not yet reviewed" list previously used. 9
+more new tests (`test_filter.py` +7, `test_web_app.py` +2). Also
+recorded a real finding from a live read-only db check: the Task
+Scheduler entry behind B2 stopped firing unattended sometime after
+`2026-08-03T20:00` and has failed silently since (root cause and fix
+identified, not yet applied — see Known Issues and the paragraph
+below).
+`uv run pytest` 379/379 (up from 328 at session start), `ruff
+check`/`format --check` clean.
+Next: no next task chosen yet, needs your go-ahead per the session
+protocol. Open candidates per TODO.md, none started: A4c (watermarking,
+still no urgency, no speculative bullets exist), B1-followup/
+B3-followup (deliberately deferred), C4 (relevance pre-filter), F2
+(metrics dashboard), F3 (Telegram notifier). P4 (accept and log to
+gap_ledger) also remains deliberately unbuilt. Fixing the Task Scheduler
+regression (stored-password logon mode) is a real open item but needs
+you at the Windows machine, not something a session here can do.
 
-Separately: B2's unattended-overnight proof remains resolved (see Known
-Issues, unchanged this session). `data/jobengine.db` continues accumulating
-real state on its own via the Windows Task Scheduler job: `jobs` grew from
-3846 to 3882 and `runs` from 10 to 12 between the last checkpoint and this
-one, both consistent with genuine unattended scheduled fetches, not manual
-runs.
+Separately: **B2's scheduling has regressed since the last checkpoint,
+confirmed this session via a real-db read-only check.** The Task
+Scheduler entry that was confirmed firing unattended on 2026-08-03 (see
+Known Issues) stopped succeeding sometime after `2026-08-03T20:00` and
+has failed silently through at least 2026-08-07: zero `runs` rows since
+then, zero log files for those dates, `Last Result -2147020576`
+(`0x800710E0`, low word `0x10E0` = "The operator or administrator has
+refused the request"). Root cause identified, not just observed: the
+task's "Interactive only" logon mode requires an active session at each
+3-hour trigger, so "run as soon as possible after a missed start" can't
+help, this is an attempted-and-rejected run, not a skipped one. Fix
+identified ("Run whether user is logged on or not" with a stored
+account password) but not yet applied — password setup hit an unrelated
+Windows issue. `sync.sh`/the task itself are confirmed still healthy: a
+manual `schtasks /run` still works. Full detail recorded in Known
+Issues below; the existing "RESOLVED 2026-08-03" text is still accurate
+for what it verified at the time, this is a new regression after it,
+not a correction to it. `jobs`/`companies`/`runs` counts (3882/15/12)
+are otherwise unchanged since the last checkpoint — this session's only
+real writes were F1's own (see above).
 
 **Read this before touching `data/jobengine.db`:** hard rule 13 in
 CLAUDE.md (added 2026-08-02, see D22 in docs/decisions.md) requires asking
@@ -91,7 +131,7 @@ project's own B1/B2 sessions) treated that file.
 | A4b | PDF conversion (LibreOffice headless) | done | `resume/pdf.py`, verified live against real `soffice` on 2 distinct real full-bank renders; found+fixed a real bullet-spacing bug along the way |
 | A4c | Watermarking (speculative preview) | not started | no urgency, no speculative bullets exist yet |
 | B1 | ATS clients + registry | done | clients+registry only, sync.py's fetch/diff loop is B2 |
-| B2 | Fetch and diff | done | scheduled and confirmed firing unattended on its own on 2026-08-03; see Known Issues, item resolved |
+| B2 | Fetch and diff | done | scheduled and confirmed firing unattended on 2026-08-03; scheduling then regressed (silent failures 08-04 through at least 08-07, "Interactive only" logon mode), fix identified not yet applied; see Known Issues |
 | B1-followup | Sponsorship-aware company vetting (DOL LCA) | not started | flagged only, not scoped, see TODO.md |
 | B3 | Filters + routing | done | signed off 2026-08-03; `filter.py` implemented, 40/40 tests pass, final numbers 859/3836 survivors (68/776/81 per profile) |
 | B3-followup | Calibrate daily filter-survivor cap | not started | deliberately deferred, see D23 in docs/decisions.md |
@@ -104,8 +144,8 @@ project's own B1/B2 sessions) treated that file.
 | D3 | Patch P0-P2 | done | `rubric/patch.py` + CLI; real deficit closed (Chroma DB / R002) via P2; P1 confirmed structurally inert against current bank, see D29 |
 | D4 | Patch P3 | done | `patch.py` gains rephrase+writeback; real deficit closed live (CMB, coverage 0.0->1.0), real bug found+fixed via that run; persist/reload/reuse chain re-verified live with full captured evidence 2026-08-05, see D30 + its second addendum |
 | E1 | Profile config + brief | done | `jobengine.profiles` package: registry (`config/profiles.yaml`) + `profiles brief` CLI; live-verified against real db/bank for all 3 profiles; see D31 |
-| E2 | Base resumes | in progress | `ai_ml_engineer` v1 persisted (`resume/base/ai_ml_engineer/v1/`, `base_resumes` id=1), ships with documented R002 soft-fail, see D32; `software_engineer`/`data_scientist` not started |
-| F1 | Review queue | not started | |
+| E2 | Base resumes | done | all 3 profiles persisted (`resume/base/{ai_ml_engineer,software_engineer,data_scientist}/v1/`, `ai_ml_engineer` also has v2; `base_resumes` ids 1-4), each `passed: true, hard_failures: []`, `coverage: 1.0`; R002 demoted to scored-only (D33), coverage measured against bank-frequency fallback not real corpus (D34, revisit later) |
+| F1 | Review queue | done | `queue/orchestrate.py` + `web/app.py`, lazy per-job trigger not batch; verified end to end against the real app/db with real job 3871; see D35 |
 | F2 | Dashboard | not started | |
 | F3 | Telegram | not started | |
 | G1 | Autonomy gating | not started | |
@@ -127,17 +167,29 @@ and the reasoning behind non-obvious choices lives in the Session log
 below and docs/decisions.md; this section is current state only.
 
 **db/** (`src/jobengine/db/`): `schema.sql` (16 tables + indexes +
-immutability triggers), `migrate.py` (`connect`/`init`/`migrate`/`stats`),
-`models.py` (pydantic models + typed accessors for `companies`, `jobs`,
-`outcomes`, `runs`, `job_analysis`, `keyword_corpus`, `model_evals`;
-new this session: `BaseResume` model, `insert_base_resume()`
-(append-only, mirrors `insert_model_eval`'s pattern),
-`latest_base_resume_version()` (0 if none exist yet, so callers always
-write `version = latest + 1` uniformly)), `__main__.py` (`uv run python
--m jobengine.db {init,migrate,stats}`). `tests/test_db.py`: 12 tests (up
-from 8), including a real FK-chain test confirming
-`job_resume_variants.base_resume_id` can reference a row inserted via
-`insert_base_resume()`.
+immutability triggers; F1 this session: `job_resume_variants` gained
+`review_status`/`reviewed_at` columns and lost its old table-level
+`UNIQUE(base_resume_id, selection_hash)` constraint, replaced by
+`idx_job_resume_variants_job_profile` on `(job_id, profile)`, see D35),
+`migrate.py` (`connect()` gained a `check_same_thread` parameter, `True`
+everywhere except `jobengine.web.app`; `migrate()` gained
+`_rebuild_job_resume_variants_if_needed()`, a real table-rebuild
+migration, the first beyond idempotent `CREATE ... IF NOT EXISTS`;
+`_SCHEMA_VERSION` now `"0002_job_resume_variants_review_state"`, applied
+to the real db this session), `models.py` (pydantic models + typed
+accessors for `companies`, `jobs`, `outcomes`, `runs`, `job_analysis`,
+`keyword_corpus`, `model_evals`, `base_resumes`; new this session, F1:
+`JobResumeVariant`, `RubricResultRow`, `Application`, `QueueEntry`
+models + `insert_job_resume_variant()`, `get_job_resume_variant()`,
+`find_job_resume_variant_by_hash()` (the file-reuse dedup lookup),
+`update_review_status()`, `insert_rubric_results()`/
+`get_rubric_results()`, `get_job_by_id()`, `latest_base_resume()` (full
+row, not just the version int), `insert_application()`,
+`list_pending_review_queue()`, `list_existing_variant_pairs()`),
+`__main__.py` (`uv run python -m jobengine.db {init,migrate,stats}`).
+Tests: `test_db.py` 42 (up from 30, +12 this session), `test_db_migrate.py`
+9 (new this session, simulates the pre-migration table shape via raw
+SQL and proves rows survive the rebuild).
 
 **resume/** (`src/jobengine/resume/`): `bank.py` (pydantic bank schema,
 `load_bank()`, `validate_bank()`, `coverage_gaps()`, `keyword_counts()`,
@@ -169,7 +221,11 @@ sha256 of its own bytes per spec 08's explicit caching requirement, see
 D28 addendum 4; `is_reverse_chronological()` loosened this session from
 strict start-date monotonicity to date-range-overlap tolerance, see D29);
 `rules.py` (`check_r001`-`check_r013`, `RubricResult`/`Deficit` pydantic
-models, `score_resume()` orchestrator); `score.py` (weighted 0-100 score
+models, `score_resume()` orchestrator; new this session: R002
+(front-load) removed from `score_resume()`'s `hard_failures` list per
+D33 in docs/decisions.md, `check_r002()` itself unchanged and still
+directly tested, `front_load` still fully weighted 25/100 in score.py);
+`score.py` (weighted 0-100 score
 per spec 08's table); `patch.py` (`apply_p0`/`apply_p1`/`apply_p2`
 implement the deterministic P0-P2 patch ladder from D3; new this
 session, D4: `call_rephrase()` (the only LLM call, via
@@ -181,9 +237,11 @@ existing variant, max 2 new calls/job), `apply_variants_to_bank()`
 (merges an accepted rewrite's `keywords_added` into the working
 candidate's `.keywords`, not just `.text`, a real bug found and fixed via
 live-model grounding, see D30); `run_ladder()` now attempts P3 after
-P0-P2 when `llm_config` is given, still P0-P2-only when omitted. No
-persistence to `job_resume_variants` (needs `base_resumes`, E2 not built)
-or to the real `resume/bank/aankit.yaml` (confirmed by asking not to
+P0-P2 when `llm_config` is given, still P0-P2-only when omitted.
+`base_resumes` is now populated (E2 done, 4 rows), but nothing yet wires
+`run_ladder()`'s output to `job_resume_variants`; still not built. No
+persistence to the real `resume/bank/aankit.yaml` from here either
+(confirmed by asking not to
 wire up in D4, see D30); `__main__.py` (CLI: `uv run python -m
 jobengine.rubric {score,explain,patch}`; `patch` only ever runs dry-run
 today). `tests/test_rubric.py`: 43 tests. `tests/test_patch.py`: 51
@@ -207,13 +265,15 @@ Tests: `test_sources.py` 20, `test_sync.py` 10.
 `is_excluded_employment_type()`, `is_already_applied()`,
 `is_citizenship_or_clearance_required()`, `is_above_target_seniority()`,
 `is_us_location()`/`classify_location()`; pure functions, nothing
-persisted). `config/filters.yaml`: all 5 hard/per-profile checks
-configured, `daily_cap: null` (deliberate, see D23). `extract.py`
-(`ExtractionSchema`, `is_good_quality_jd()`, `extract_keywords()` (the
-only LLM call site, via `router.get_provider("extract", ...)`),
-`analyze_job()` (production orchestrator, fans out to `job_analysis`/
-`keyword_corpus`)). Tests: `test_filter.py` 40, `test_extract.py` 14
-(gained `test_get_job_analysis_reads_back_a_written_row` this session).
+persisted; new this session, F1: `passes_all_filters(conn, job, config)
+-> bool`, the full chain in one call, first real caller is
+`web/app.py`'s queue listing). `config/filters.yaml`: all 5
+hard/per-profile checks configured, `daily_cap: null` (deliberate, see
+D23). `extract.py` (`ExtractionSchema`, `is_good_quality_jd()`,
+`extract_keywords()` (the only LLM call site, via
+`router.get_provider("extract", ...)`), `analyze_job()` (production
+orchestrator, fans out to `job_analysis`/`keyword_corpus`)). Tests:
+`test_filter.py` 47 (up from 40, +7 this session), `test_extract.py` 14.
 
 **llm/** (`src/jobengine/llm/`): `schemas.py`, `providers/local.py`
 (`LocalProvider`, `think=False` pinned on every call), `providers/
@@ -260,36 +320,161 @@ render/score integration tests, same pattern as `test_rubric.py`'s own
 `real_sample_pdf` fixture, not mocked), `test_profiles_persist.py` 5
 (new).
 
-**resume/base/** (new this session, E2): `ai_ml_engineer/v1/` — the
-first real `base_resumes` artifact this project has produced.
-`selection.yaml`, `resume.docx`, `resume.pdf` (confirmed
-byte-size-identical, matching page-1 text, to the PDF the user visually
-reviewed before persisting), `rubric.json` (`score 63.40`,
-`hard_failures: ['R002']`), hand-written `CHANGELOG.md`. Real
-`base_resumes` row `id=1` committed to `data/jobengine.db`. See D32 in
-docs/decisions.md for the full R002 ship-decision writeup.
+**resume/base/** (E2, done this session): all 3 profiles now have a
+persisted version, `ai_ml_engineer` has two.
+`ai_ml_engineer/v1/` — first real `base_resumes` artifact this project
+produced (prior session), left untouched per spec 09's "never
+overwritten" versioning; its `rubric.json` still reads pre-D33
+(`hard_failures: ['R002']`), stale but accurate to what it was scored
+against at the time.
+`ai_ml_engineer/v2/` — same selection as v1 (confirmed byte-identical
+`selection.yaml` aside from the version field, zero bank content
+changed for this profile), regenerated solely to carry a post-D33
+`rubric.json` (`score 63.40`, `passed: true`, `hard_failures: []`).
+`software_engineer/v1/`, `data_scientist/v1/` — first-ever versions for
+each. `software_engineer`: `score 66.87`, `passed: true`,
+`hard_failures: []`, selection includes `role_utd_researcher`'s newly
+retagged `b_utd_02`. `data_scientist`: `score 66.96`, `passed: true`,
+`hard_failures: []`, selection excludes `role_bantrly_lessongen`
+entirely (dropped this session).
+Every version has `selection.yaml`/`resume.docx`/`resume.pdf`/
+`rubric.json`/hand-written `CHANGELOG.md`. `base_resumes` table: 4 rows
+(`id` 1-4) committed to `data/jobengine.db`. See D32 (the original
+R002 investigation), D33 (R002's hard-failure demotion), and D34 (the
+bank-frequency-fallback coverage caveat) in docs/decisions.md.
 
-**Full suite: 328/328 passing (up from 319), `ruff check src/` clean,
-`ruff format --check src/` clean** (3 pre-existing `RUF059` warnings in
-`test_render.py`, confirmed via `git stash` to predate this session,
-untouched).
+**queue/** (`src/jobengine/queue/`, new this session, F1):
+`orchestrate.py` — `QueueContext` (dataclass: `conn`, `full_bank`,
+`identity`, `profile_configs`, `filter_config`, `llm_config`,
+`local_client`, built once per process); `ensure_reviewed(ctx, job_id,
+profile)` (the lazy-trigger entry point: ensures `job_analysis` exists
+via C3's `analyze_job()`, then ensures a `job_resume_variant` exists via
+D3/D4's `run_ladder()`, idempotent, real deficits persisted to
+`rubric_results`); `approve()`/`reject()` (review decisions: approve
+sets `review_status='approved'` and inserts an `applications` row
+`status='queued', autonomy_level=0`; reject sets `review_status=
+'rejected'` and creates no `applications` row, deliberately, see D35);
+`list_queue()` (thin wrapper over `db/models.py`'s
+`list_pending_review_queue()`). No `__main__.py`: only the web routes
+and tests call this module. Tests: `test_queue_orchestrate.py`, 7 tests,
+every one exercising the real bank/render/PDF/score pipeline (there is
+no lighter mock for `run_ladder()`, matching `test_patch.py`'s own
+precedent), LLM calls mocked via a stage-aware `_FakeClient` that
+inspects the requested schema's fields to serve both the extract and
+rephrase stages correctly from one fake.
+
+**web/** (`src/jobengine/web/`, new this session, F1): `app.py` —
+FastAPI app, `get_ctx()` (lazy singleton `QueueContext`, overridden in
+tests via `app.dependency_overrides`), `GET /` (pending queue +
+newly-B3-matched-but-never-triggered pairs from the last 7 days), `GET
+/jobs/{job_id}/{profile}` (the lazy trigger; renders score/coverage/
+front_load/hard-failures/the real rendered PDF via a `/resume` static
+mount), `POST /jobs/{job_id}/{profile}/{approve,reject}`.
+`templates/queue_list.html`/`queue_detail.html` (plain server-rendered
+HTML, no JS, per spec: reviewing means seeing the already-patched
+candidate and deciding, not editing bullet text in a browser).
+`JOBENGINE_DB_PATH` env var overrides `DEFAULT_DB_PATH` for manual
+testing against a scratch copy. `uv run uvicorn jobengine.web.app:app
+--reload` (CLAUDE.md's already-documented dev command, now real for the
+first time). Tests: `test_web_app.py`, 10 tests (up from 8, +2 this
+session), FastAPI `TestClient` against a `tmp_path` db via dependency
+override, covering first-visit trigger, second-visit idempotency,
+approve/reject state transitions and their `applications`-row side
+effects, the list page dropping a rejected job, and (new this session)
+`_new_pairs()`'s `passes_all_filters()` gating: a clean untriggered job
+appears as "not yet reviewed," one with a non-US location does not.
+
+**resume/rendered/variants/** (new this session, F1): per-(job,profile)
+lazily-rendered candidates, `{job_id}/{profile}/candidate_{tiers}.
+{docx,pdf}`. One real entry as of this checkpoint:
+`3871/software_engineer/candidate_P0_P1_P2_P3.{docx,pdf}` (this
+session's real worked-example verification, see below).
+
+**Full suite: 379/379 passing (up from 328 at session start, 370 after
+F1's initial build, +9 for `passes_all_filters`), `ruff check src/`
+clean, `ruff format --check src/` clean** (3 pre-existing `RUF059`
+warnings in `test_render.py`, confirmed via `git stash` to predate an
+earlier session, untouched, unaffected by this session).
 
 **`data/jobengine.db` real accumulated state, verified this checkpoint:**
-15 companies, 3882 jobs, 12 `runs` rows, 0 `applications`,
-**`job_analysis` and `keyword_corpus` both still 0 rows, `gap_ledger`
-also still 0 rows** (unchanged: no orchestrator or P4 run against real
-jobs this session either), 150 `human_labels` rows, 30 `model_evals`
-rows. **`base_resumes`: 1 row, no longer 0** — this session's own
-`persist_base_resume()` call, the first-ever write to this table
-(`id=1`, `profile=ai_ml_engineer`, `version=1`); confirmed deliberate,
-not accidental, per the user's own explicit request. `jobs`/`companies`
-unchanged since the prior checkpoint (no sync run happened this
-session); every other table's read-only status was reconfirmed before
-this session's one real write, not assumed.
+15 companies, 3882 jobs, 12 `runs` rows, 150 `human_labels` rows, 30
+`model_evals` rows, 4 `base_resumes` rows (unchanged this session).
+**F1 wrote 4 genuinely new kinds of real rows to this db for the first
+time ever, all from the single real worked-example verification (job
+3871), not synthetic data:** `job_analysis` 0 -> 1, `keyword_corpus` 0
+-> 7, `job_resume_variants` 0 -> 1, `rubric_results` 0 -> 1. Every one
+confirmed deliberate (asked before the migration that added the
+columns/index these rows needed, then asked again implicitly satisfied
+by running the documented verification step). `applications` and
+`gap_ledger` both still 0 rows: the worked example was rejected, not
+approved (a genuine, correct outcome given `hard_failures: ['R001']`,
+not a shortcut to avoid exercising the approve path — the automated
+test suite's `test_approve_flips_review_status_and_creates_application`
+covers that path against a scratch db instead), and P4 (gap ledger
+writeback) still isn't built. `jobs`/`companies`/`runs` unchanged since
+the prior checkpoint (no sync activity happened this session); every
+other table's read-only status was reconfirmed before this session's
+real writes, not assumed.
 
 ---
 
 ## Known issues and deferred work
+
+- **RESOLVED 2026-08-07, not left open:** F1's `GET /` "not yet
+  reviewed" section used to only reapply B3's title check
+  (`matches_profiles()`), not the full B3 filter chain, so a job that
+  failed location/seniority/employment-type/citizenship/already-applied
+  could still show up as "not yet reviewed" and get a real
+  `job_resume_variant` even though it should never have survived B3.
+  Fixed by adding `passes_all_filters(conn, job, config) -> bool` to
+  `pipeline/filter.py` (the full chain in one call) and gating
+  `web/app.py`'s `_new_pairs()` on it before the per-profile
+  `matches_profiles()` fan-out. 8 new tests (`test_filter.py` +7 for
+  `passes_all_filters` itself, one per exclusion axis plus a clean
+  baseline; `test_web_app.py` +2, confirming a clean untriggered job
+  appears and a non-US-location one doesn't).
+- **`migrate.py`'s `_rebuild_job_resume_variants_if_needed()` is
+  bespoke to this one migration, not a reusable framework.** PROGRESS.md
+  already flagged before F1 that `_SCHEMA_VERSION` is a single hardcoded
+  string, not a real migrations directory; F1 needed an actual
+  table-rebuild (not just an additive `CREATE INDEX`) and got one
+  written specifically for `job_resume_variants`' old shape. The next
+  migration that needs a rebuild (a column type change, a dropped
+  column elsewhere) will need its own similarly bespoke function again,
+  or this should finally become `db/migrations/000N_*.sql` with
+  `schema_migrations` tracking each file independently. Not built now,
+  since only one migration has ever needed it.
+- **F1's "approve" action creates an `applications` row with
+  `autonomy_level=0` and `status='queued'`, and nothing consumes it
+  yet.** Phase G (autonomy gating, Playwright apply) is entirely
+  unbuilt; `0` is a safe, most-manual placeholder per D16's existing
+  precedent (autonomy level is decided deterministically by G1's form-
+  schema inspection, not by the reviewer), not a real decision about
+  what should happen to an approved job. An approved job just sits in
+  `applications` with `status='queued'` until Phase G exists to act on
+  it.
+- **F1 has no batch/cron orchestrator, by deliberate scope decision
+  (confirmed via `AskUserQuestion`), not an oversight** — see D35 in
+  docs/decisions.md. `job_resume_variants` only grows one row at a time,
+  each time a human opens a specific `/jobs/{job_id}/{profile}` URL.
+  There is currently no way to see "everything that survived B3 today"
+  pre-scored; the reviewer has to click into the "not yet reviewed"
+  list to trigger scoring for each one. Building a real batch version
+  properly needs C4 (relevance pre-filter, not built) first, per spec
+  08's own stage 2.5 ordering, so this wasn't attempted as a stopgap.
+- `src/jobengine/web/app.py`'s `_LIST_WINDOW_DAYS = 7` (how far back
+  `GET /` looks for newly-matched pairs) is a free, unconfigured choice,
+  not derived from anything. Revisit if real usage shows 7 days is too
+  short (a job sits unreviewed past a week) or too long (the list gets
+  cluttered).
+- FastAPI's `TestClient` (used in `tests/test_web_app.py`) emits a
+  `StarletteDeprecationWarning` about `httpx`/`starlette.testclient`
+  every test run ("install `httpx2` instead"), an upstream dependency
+  concern, not this codebase's own code. Harmless today (doesn't fail
+  the suite), not fixed since it would mean adding a new dependency
+  (`httpx2`) without being asked, per hard rule 5. Revisit if a future
+  `starlette`/`httpx` upgrade actually breaks `TestClient` rather than
+  just warning about it.
 
 - **`base_resumes` has no `UNIQUE(profile, version)` constraint in
   `schema.sql`.** `persist_base_resume()`
@@ -301,18 +486,29 @@ this session's one real write, not assumed.
   session at a time, never concurrent), but worth a schema constraint or
   an app-level guard before this could run unattended.
 - **`persist_base_resume()` never sets `retired_at` on a profile's prior
-  versions when a new one is inserted.** Doesn't matter yet (only one
-  version, `ai_ml_engineer` v1, exists total), but spec 09 says "keep at
-  least the previous two versions live," implying some retirement logic
-  eventually; not built, since nothing has needed it yet.
-- **`ai_ml_engineer`'s `resume/base/v1` ships with a documented R002
-  soft-fail** (`front_load 0.50`, needs `0.75`) — deliberate, not an
-  oversight, full investigation and rationale in D32 (docs/decisions.md)
-  and the status table above. `software_engineer`/`data_scientist` have
-  their own distinct rubric gaps too (`data_scientist`'s own R003
-  failure is `role_bantrly_lessongen=2`, not the same role as
-  `software_engineer`'s `role_utd_researcher=2`, per the earlier
-  diagnostic) — neither has had an E2 session yet.
+  versions when a new one is inserted.** Now has a real second version
+  to test against (`ai_ml_engineer` v1 and v2, both live, neither
+  retired) and still doesn't matter: spec 09 only requires keeping "at
+  least the previous two versions live," which 2 total trivially
+  satisfies. Revisit once a profile reaches a 3rd version and the
+  oldest genuinely needs retiring.
+- **E2 is done, all 3 profiles pass clean (`hard_failures: []`,
+  `coverage: 1.0`), but two things behind that number are worth reading
+  before trusting it at face value.** (1) R002 (front-load) is no
+  longer a hard failure at all, demoted to a scored-only component this
+  session (D33, docs/decisions.md) after `ai_ml_engineer` (D32,
+  `front_load` ceiling 0.50) and `software_engineer` (this session,
+  ceiling 0.40) both hit the same real structural wall with no
+  legitimate fix; `front_load` is still visible in every `rubric.json`
+  and still weighted 25/100 in the score, just not gating. (2)
+  `coverage: 1.0` for all 3 is measured against bank-frequency fallback
+  keywords, not real `keyword_corpus` data (still 0 rows) — see D34,
+  docs/decisions.md, for the full reasoning and why this needs
+  re-validation once corpus data exists. The R003/R013 content gaps
+  that used to block `software_engineer` (`role_utd_researcher=2`) and
+  `data_scientist` (`role_bantrly_lessongen=2`) are both resolved, not
+  just documented: see the retag/drop decisions in this session's log
+  entry below.
 - **E1's `config/profiles.yaml` only has one real caller
   (`profiles/brief.py`); `patch.py`'s `run_ladder()` and
   `scripts/render_sample.py`/`render_pdf_sample.py` still construct
@@ -329,17 +525,21 @@ this session's one real write, not assumed.
   explicitly deferred to E2, when a human reviews a real generated
   resume against a real target title, not decided blind in E1. See D31
   in docs/decisions.md.
-- **`profiles brief`'s "current base resume" section is the
+- **`profiles brief`'s "current base resume" section is still the
   on-the-fly-rendered full candidate (`select_for_profile` output), not
-  a real base resume.** Labeled as such in the brief's own output.
-  Once E2 produces a real `base_resumes` row, this section should read
-  that instead; that switch isn't built yet. Its `required_keywords` are
-  the brief's own top-keywords list (corpus or bank-frequency
-  fallback), a forced choice (no job-specific keyword list exists at
-  profile granularity) rather than an arbitrary one — worth knowing
-  when reading a bank-frequency-fallback brief, since coverage will
-  trivially read 1.0 (the "required" keywords are, by construction,
-  already present in whichever bullets contributed them).
+  a real base resume, even though real `base_resumes` rows now exist
+  for all 3 profiles as of this session.** Labeled as such in the
+  brief's own output; the switch to reading the real row isn't built
+  yet, more of a live gap now than when this was first written since
+  there's finally real data it could read instead. Its
+  `required_keywords` are still the brief's own top-keywords list
+  (corpus or bank-frequency fallback), a forced choice (no job-specific
+  keyword list exists at profile granularity) rather than an arbitrary
+  one — worth knowing when reading a bank-frequency-fallback brief,
+  since coverage will trivially read 1.0 (the "required" keywords are,
+  by construction, already present in whichever bullets contributed
+  them). See D34, docs/decisions.md, for why this same caveat now
+  matters for the real persisted base resumes too, not just the brief.
 - **`apply_variants_to_bank()`/`dump_bank()` (D4) are built and tested
   but nothing in this codebase calls them against the real
   `resume/bank/aankit.yaml`.** Confirmed by asking before D4 started:
@@ -372,18 +572,23 @@ this session's one real write, not assumed.
   nothing in `patch.py` needs to change for that to start working, it
   already implements the swap logic correctly, it just has nothing to do
   yet. See D29 in docs/decisions.md.
-- **`role_utd_researcher` has exactly 1 bullet tagged for
-  `software_engineer`** (`resume/bank/aankit.yaml`), one short of R003's
-  3-bullet floor (1 bullet + 1 summary = 2, needs 3-8). This is a content
-  gap the patch ladder cannot fix (P0-P2 reorder/swap/promote existing
-  selected content, they don't invent or reassign profile tags), so
-  **every** `software_engineer`-profile job will fail R003 (and R013, via
-  slop_lint's own H004 catching the same gap) regardless of the job's
-  specific keywords, until either more bullets in that role get tagged
-  `software_engineer` or the role is otherwise reconsidered. Found while
-  grounding D3 against real jobs; not something D1's own grounding
-  session surfaced, since D1 only checked coverage numbers, not whether
-  every role clears R003 post-filter for every profile.
+- **RESOLVED this session, not still open:** `role_utd_researcher` used
+  to have exactly 1 bullet tagged `software_engineer`
+  (`resume/bank/aankit.yaml`), one short of R003's 3-bullet floor,
+  causing every `software_engineer`-profile job to fail R003/R013
+  regardless of keywords (the gap this bullet originally documented,
+  found while grounding D3). Fixed by reviewing all 5 of that role's
+  bullets for genuine `software_engineer` fit and retagging `b_utd_02`
+  (data processing across CMB simulated maps, the least ML-research-
+  specific of the five) onto the profile, bringing it to 3 total
+  entries. `role_bantrly_lessongen` had the identical shape for
+  `data_scientist` (1 tagged bullet, `b_lessongen_04`) but none of its
+  other 4 bullets read as genuine data-science work on review, so that
+  role was dropped from `data_scientist` selection entirely instead
+  (removed `b_lessongen_04`'s tag rather than force a second, ill-fitting
+  one). Both are real, confirmed via live `select_for_profile()` runs
+  and `bank validate`, not just described; see this session's log entry
+  below for the full before/after detail on each.
 - **`job_analysis` and `keyword_corpus` are still 0 rows in the real
   `data/jobengine.db`, and this now blocks `rubric score`/`explain` from
   running against real production data, not just C3's corpus feature.**
@@ -605,6 +810,44 @@ this session's one real write, not assumed.
   firings with real content changes is the proof this item was waiting on.
   B2 is production-live, not just manually-invokable; TODO.md and the
   Status table above reflect this.
+  **REGRESSED 2026-08-07, discovered via a real-db read-only check, not
+  left unnoticed:** the confirmed-working schedule above stopped
+  succeeding sometime after its own last good run
+  (`2026-08-03T20:00:01`) and failed silently through at least
+  2026-08-07 — `runs` has zero rows in that window (confirmed via
+  `SELECT DATE(first_seen_at)... GROUP BY` on the real db showing only
+  2026-08-02/08-03, and `SELECT started_at FROM runs ORDER BY
+  started_at DESC LIMIT 10` showing nothing past 08-03T20:00), and zero
+  Task Scheduler log files exist for the missed dates either. Task
+  Scheduler's own `Last Result` for the task is `-2147020576`
+  (`0x800710E0`); the low word `0x10E0` decodes to "The operator or
+  administrator has refused the request." Root cause identified, not
+  just the symptom: the task's logon mode is "Interactive only," which
+  requires an active logged-in session at the exact moment each 3-hour
+  trigger fires; every trigger that lands while nobody is logged in gets
+  rejected outright, not queued. This is why "start the task as soon as
+  possible after a scheduled start is missed" (a setting already
+  enabled) doesn't help — that setting recovers a *skipped* trigger
+  (e.g., the machine was off), not a trigger that fired and was actively
+  *refused*, which is what `0x800710E0` means. Fix identified: switch
+  the task's logon mode to "Run whether user is logged on or not" with a
+  stored account password, which lets Task Scheduler run it via a
+  background service session regardless of whether anyone is logged in.
+  **Not yet applied**: setting the stored password hit an unrelated
+  Windows issue during setup, not yet resolved. Confirmed this is purely
+  a scheduling problem, not a pipeline problem: a manual `schtasks /run`
+  still works fine today, meaning `sync.sh`/`sync.py`/the task's own
+  command line are all still healthy; only the *unattended* trigger path
+  is broken.
+  **Consequence for B-followup (daily filter-survivor cap calibration,
+  TODO.md):** the real `jobs`/`runs` history has a genuine multi-day
+  gap, 2026-08-04 through at least 2026-08-07, with zero organic fetch
+  activity, not because there was nothing to fetch but because the
+  schedule silently failed to run. When B3-followup eventually
+  calibrates a daily survivor cap against real `first_seen_at` history,
+  this gap must be excluded or explicitly noted, not averaged over as if
+  it were a genuine zero-volume day — doing so would understate real
+  daily volume.
 - `sync.py`'s CLI (`_main()`) calls `logging.basicConfig(level=logging.INFO)`
   globally, which also turns on `httpx`'s own INFO-level request logging,
   every GET request prints a line. Harmless (stderr noise, not a
@@ -632,14 +875,18 @@ this session's one real write, not assumed.
   makes this a real gap for a future pass, not implemented this session
   because it was never asked for, only `is_citizenship_or_clearance_required`
   (JD text) and the employment-type/dedup checks were.
-- B3's filter functions are exercised end to end against the real
-  3834-job db only via the one-off scratch scripts run during this
-  session (deleted after use, not checked in); there is no CLI entry
-  point yet (`uv run python -m jobengine.pipeline.filter ...`) the way
+- B3's filter functions still have no CLI entry point
+  (`uv run python -m jobengine.pipeline.filter ...`) the way
   `registry`/`sync`/`bank`/`slop_lint` each have one. Nothing in TODO.md's
-  B3 DoD requires a CLI, so this wasn't built, but downstream stages (C3,
-  C4) will need *some* callable surface; revisit when one of them actually
-  needs to invoke this from outside a Python import.
+  B3 DoD requires a CLI, so this still isn't built. **Partially
+  addressed, not fully:** F1 (this session) added
+  `passes_all_filters(conn, job, config) -> bool`, a real Python callable
+  running the full chain (title match + location + seniority +
+  employment type + citizenship/clearance + already-applied) in one
+  call, and wired it into `web/app.py`'s queue-listing logic — the first
+  real caller of the combined chain, not just individual checks in
+  isolation. Still no CLI/shell-invokable surface; revisit if a future
+  stage needs one outside a Python import.
 - TODO.md's B1-followup (DOL LCA-based sponsorship vetting) is flagged
   only, no design work done: not scoped, no data source integration
   started, just a placeholder so the idea isn't lost.
@@ -1099,6 +1346,263 @@ this session's one real write, not assumed.
 ## Session log
 
 (Newest first. Date, task id, what changed, what to do next.)
+
+- 2026-08-07, F1 follow-up (done, same session as F1's initial build):
+  Two unrelated items handled back to back.
+  (1) Recorded a real B2 scheduling regression, discovered via a
+  read-only check against the real db the user ran directly: `runs` has
+  zero rows since `2026-08-03T20:00:01`, zero Task Scheduler log files
+  for the missed dates, `Last Result -2147020576`
+  (`0x800710E0` = "The operator or administrator has refused the
+  request"). Root cause: the task's "Interactive only" logon mode
+  requires an active session at each 3-hour trigger; "run as soon as
+  possible after a missed start" doesn't help since this is a rejected
+  attempt, not a skipped one. Fix identified (switch to "Run whether
+  user is logged on or not" with a stored password) but not applied —
+  password setup hit an unrelated Windows issue. Manual `schtasks /run`
+  still works, confirming this is purely a scheduling problem, not a
+  pipeline one. Recorded in PROGRESS.md's header, Status table (B2 row),
+  and Known Issues (full detail, plus the consequence for B3-followup's
+  future daily-cap calibration: 08-04 through at least 08-07 is a real
+  gap to exclude, not a genuine zero-volume period).
+  (2) Added `passes_all_filters(conn, job, config) -> bool` to
+  `src/jobengine/pipeline/filter.py`: B3's full deterministic chain
+  (`matches_profiles` + location + seniority + employment type +
+  citizenship/clearance + already-applied) in one call, tests-first per
+  hard rule 7 (`tests/test_filter.py` +7, one per exclusion axis
+  isolated via a title that still matches a profile alias, e.g.
+  "Software Engineering Manager" for the seniority case, plus a clean
+  baseline and an already-applied case using the real FK chain). Wired
+  into `src/jobengine/web/app.py`'s `_new_pairs()`, replacing the
+  title-only `matches_profiles()` check the "not yet reviewed" list
+  used since F1's initial build (a gap F1's own Known Issues entry had
+  already flagged). 2 new `test_web_app.py` tests confirm the wiring
+  itself, not just the underlying function: a clean untriggered job
+  still appears, a non-US-location one no longer does. One ruff
+  SIM103 simplification applied (`return not is_already_applied(...)`
+  instead of an explicit `if/return False/return True`).
+  Full suite 379/379 (up from 370 after F1's initial close), `ruff
+  check`/`format --check` clean.
+  Next: no next task chosen yet, needs explicit go-ahead per the session
+  protocol.
+
+- 2026-08-07, F1 (done): Planned via Claude Code's plan mode before
+  writing any code, per the user's explicit request to see a plan
+  grounded against real data first. No F1 spec file existed (TODO.md's
+  Rules section deferred writing Phase F specs until Phase D ran on
+  real data, which it now has); confirmed this via direct file check
+  rather than assuming, and treated the approved plan itself as F1's
+  design document.
+  Research phase: read `docs/architecture.md`'s pipeline stage list (0-9,
+  review is stage 8, downstream of extraction/routing/rubric/patch/
+  re-score, upstream of apply), confirmed via `grep`/direct reads that
+  nothing in the codebase had ever persisted to `job_resume_variants` or
+  `applications` (zero models, zero insert helpers, zero real rows), and
+  that no daily orchestrator wires C3 extraction through D3/D4 patching
+  against real jobs. Used `AskUserQuestion` on the one genuinely
+  consequential scope fork (lazy per-job trigger vs. UI-only assuming a
+  future batch job vs. building a real batch orchestrator now); the user
+  chose lazy-trigger, since a real batch version needs C4 (relevance
+  pre-filter, not built) for a proper survivor cut first.
+  Delegated the file-by-file implementation plan to a Plan sub-agent
+  with the scope decision and all research findings as fixed context,
+  then reviewed its output against the actual codebase before accepting
+  it, not verbatim: caught a real bug in its proposal by reading
+  `is_already_applied()` (`pipeline/filter.py`) directly — the
+  sub-agent's applications-table-based review-state design would have
+  silently broken that already-shipped B3 filter (it matches any
+  `applications` row for a job_id regardless of `status`). Corrected the
+  plan before writing it to the plan file: review state moved onto new
+  `job_resume_variants.review_status`/`reviewed_at` columns,
+  `applications` rows created only on approval. Plan approved via
+  `ExitPlanMode`.
+  Implementation followed hard rule 7 (tests before code) end to end,
+  file by file: `schema.sql` (new columns, new
+  `idx_job_resume_variants_job_profile` index, explanatory comment) ->
+  `specs/00-data-model.md`/`specs/08-rubric.md` dedup-wording fix ->
+  `tests/test_db.py` (+12) -> `db/models.py` (`JobResumeVariant`,
+  `RubricResultRow`, `Application`, `QueueEntry` + 10 new helpers) ->
+  ran the new tests, which immediately caught a second real bug the
+  plan had underestimated: the old `UNIQUE(base_resume_id,
+  selection_hash)` table constraint was still literally present (only a
+  new index had been added alongside it, not instead of it), so the
+  exact multi-job-shares-a-hash case the fix was meant to allow still
+  failed. Removed the old constraint from `schema.sql` for real, which
+  meant `migrate.py` now needed a genuine table-rebuild path (SQLite
+  can't drop a table-level constraint via `ALTER TABLE`), not just an
+  additive `CREATE INDEX` as originally planned — built
+  `_rebuild_job_resume_variants_if_needed()` and a dedicated
+  `tests/test_db_migrate.py` (9 tests) that reconstructs the real
+  pre-migration table shape via raw SQL to prove it. `queue/
+  orchestrate.py` (`ensure_reviewed()`/`approve()`/`reject()`/
+  `list_queue()`), tests-first (`test_queue_orchestrate.py`, 7 tests,
+  all real bank/render/PDF/score, matching `test_patch.py`'s own
+  precedent that `run_ladder()` has no lighter mock; a stage-aware
+  `_FakeClient` serves both the extract and rephrase stages from one
+  fake by inspecting the requested schema's fields, since a naive single
+  fixed payload broke once P3 genuinely fired during a real test run).
+  `web/app.py` + Jinja2 templates, tests-first (`test_web_app.py`, 8
+  tests) — hit and fixed a third real bug only surfaced by running the
+  actual FastAPI `TestClient`: sync routes/`Depends()` run in a
+  threadpool by default, so a single shared `sqlite3.Connection` crossed
+  threads across requests and `sqlite3` rejected it; added a
+  `check_same_thread` parameter to `db/migrate.py`'s `connect()`,
+  `False` only for the web app, documented as safe for this app's real
+  single-operator usage, not a general concurrency claim.
+  Full suite 370/370 (up from 328), `ruff check`/`format --check` clean,
+  entirely against scratch/`tmp_path` dbs — confirmed before touching
+  `data/jobengine.db` at all.
+  Asked explicitly, via `AskUserQuestion`, before running the real
+  migration (`uv run python -m jobengine.db migrate` against the real
+  db), per hard rule 13; proceeded only after explicit confirmation.
+  Verified read-only afterward: new index present, old constraint gone,
+  `job_resume_variants`/`applications` still 0 rows, `schema_migrations`
+  now has both `0001_initial` and the new version. Then verified end to
+  end against the real running app (`uv run uvicorn jobengine.web.app:
+  app`) and the real db, using this session's own real worked example
+  (job_id 3871, Airbnb "Software Engineer, Biztech Client and Identity",
+  already confirmed to survive B3 for `software_engineer`): first visit
+  ~22s (real Ollama cold start, matches C1's documented latency), the
+  real `analyze_job()`/`run_ladder()` ran for real, on-screen numbers
+  matched the plan's pre-computed worked example exactly (score 18.98,
+  coverage 0.14, `hard_failures: ['R001']`, tiers `['P0','P1','P2',
+  'P3']`); second visit 0.01s, byte-identical HTML, zero new model
+  calls; `POST .../reject` returned 303, flipped `review_status`,
+  created no `applications` row (confirming the filter-conflict fix
+  holds for real), and the job dropped off `GET /`. Stopped the dev
+  server afterward and reconfirmed `jobs`/`companies` row counts
+  unchanged (3882/15), only the intended new tables touched. This is
+  the first-ever real `job_analysis`/`keyword_corpus`/
+  `job_resume_variants`/`rubric_results` rows this project has written
+  to `data/jobengine.db` outside a scratch copy.
+  Recorded the full writeup, including all three bugs found and fixed
+  during implementation and the real end-to-end verification evidence,
+  as D35 in docs/decisions.md.
+  Next: no next task chosen yet, needs explicit go-ahead per the
+  session protocol. Open candidates per TODO.md: A4c, B1-followup/
+  B3-followup, C4, F2 (dashboard), F3 (Telegram). F1's own known gaps
+  (no batch orchestrator, `_new_pairs()` only reapplies B3's title
+  check) are documented above, not silently left for a future session
+  to rediscover.
+
+- 2026-08-07, E2 (done, all 3 profiles): Closed out the 2 remaining
+  profiles from the prior session plus a rubric-design change touching
+  all 3.
+  Showed `software_engineer`'s full pre-edit rubric state first, same
+  detail level as the prior session's `ai_ml_engineer` review: `passed:
+  false`, `score 66.58`, `hard_failures: ['R002', 'R003', 'R013']`,
+  `coverage: 1.0`, `front_load: 0.40`, real per-keyword above/below-fold
+  table (page 1 height 792, half 396.0; 4/10 top keywords above the
+  fold), and R003/R013 both traced to the same root cause,
+  `role_utd_researcher=2` entries.
+  Before editing anything, showed all 5 of that role's bullets in full
+  (text + keywords + current profile tags), per explicit request to see
+  what's available before deciding. Reviewed each for genuine
+  `software_engineer` fit: `b_utd_02` (processing/managing 1,600 CMB
+  simulated maps across splits) read as data-pipeline engineering, the
+  least ML-research-specific of the five (`b_utd_01`/`b_utd_03` read as
+  architecture design/publication framing). Retagged `b_utd_02` onto
+  `software_engineer` (now `[ai_ml_engineer, data_scientist,
+  software_engineer]`). `bank validate`: 0 errors/0 warnings
+  (`software_engineer` bullet count 15, up from 14). Re-ran the full
+  rubric state: `hard_failures: ['R002']` only, R003/R013 both clear
+  (`role_utd_researcher`: 3 entries), `score 66.87`, `front_load`
+  unchanged at 0.40 (same top-10 list, retagged bullet's own keywords
+  weren't in it).
+  User then proposed reclassifying R002 from a hard failure to a
+  scored-only component, having hit the same real structural front-load
+  ceiling on two profiles now (`ai_ml_engineer` 0.50 in D32,
+  `software_engineer` 0.40 here) with no viable fix that doesn't cost
+  more than it gains. Asked to see, before any change: how many of the
+  other 12 hard rules are genuinely categorical vs. share R002's
+  "continuous measurement forced into a threshold" shape. Reviewed all
+  13 against spec 08's own text: R001 (coverage) shares the shape
+  exactly and has its own continuous scored twin same as R002, and
+  spec 08's own P4 text already treats R001 as different-in-kind from
+  other hard rules ("skip the job entirely if a hard rule *other than
+  R001*..."), independent evidence the shape argument is sound; R006
+  (line count) is R002's closest architectural sibling, same
+  `pdfplumber`-derived geometry, same soft-convention-as-cutoff shape;
+  R003 doesn't share the shape (no continuous twin, its 3-8 bounds
+  encode a real structural convention, not a proxy measurement); the
+  remaining 9 are genuinely categorical (schema-guaranteed, formatting,
+  grammar, ordering, typography, structural, presence checks). Argued
+  for demoting R002 only, not R001/R006 too, since only R002 has the
+  evidence: two independent, exhaustive investigations (this session's
+  and D32's) actually found a real ceiling, versus a plausible argument
+  by shape alone for the other two; R001 in particular carries D27's
+  existing precedent toward strictness and is the system's only gate
+  against a resume that doesn't cover a job's keywords at all. Drafted
+  the docs/decisions.md entry for review before writing anything, per
+  explicit instruction not to implement yet.
+  On approval, applied for real: `rules.py`'s `score_resume()` no
+  longer includes `check_r002()` in its `hard_failures` list (the
+  function itself is untouched, still directly unit-tested);
+  `front_load` stays fully weighted 25/100 in `score.py`, unchanged.
+  Wrote **D33** to docs/decisions.md verbatim as drafted and approved.
+  Full suite re-run: 328/328 (no regressions, no new tests needed since
+  no existing test asserted R002 specifically inside `score_resume()`'s
+  integration path, confirmed by grep before editing). Re-ran both
+  profiles' full state: `ai_ml_engineer` now `passed: true,
+  hard_failures: []` (its only prior failure was R002); `software_engineer`
+  now `passed: true, hard_failures: []` too (`front_load: 0.40` still
+  visible in measurements, just not gating).
+  Showed `data_scientist`'s full rubric state next: `hard_failures:
+  ['R003', 'R013']` (R002 no longer a gate as of D33), both tracing to
+  `role_bantrly_lessongen=2`, the same shape `role_utd_researcher` had
+  for `software_engineer` per the user's own recollection, confirmed
+  true by direct inspection before trusting it. Showed all 5 of that
+  role's bullets in full; unlike `role_utd_researcher`, none of the
+  other 4 (`b_lessongen_02` guardrails/content-safety retry logic,
+  `b_lessongen_03` defensive JSON validation, `b_lessongen_05` a Gradio
+  UI deployment) read as genuine data-science work, all systems/app
+  engineering. Per the user's decision, dropped the role from
+  `data_scientist` entirely rather than force an ill-fitting second tag:
+  removed `b_lessongen_04`'s `data_scientist` tag (now `[ai_ml_engineer]`
+  only). `bank validate`: 0 errors/0 warnings (`data_scientist` bullet
+  count 16, down from 17). Confirmed live via `select_for_profile()`
+  that `role_bantrly_lessongen` is completely absent from the
+  `data_scientist` candidate's role list, not just under-populated (its
+  own docstring already guarantees this: a role left with zero tagged
+  bullets is dropped, the untagged summary doesn't keep it alive). Full
+  rubric state after: `passed: true`, `hard_failures: []`, `score
+  66.96` (up from 61.59; page count also dropped 3 -> 2 as a side
+  effect, pulling in `score.py`'s page-penalty component beyond just
+  the R003/R013 fix).
+  Before generating final files, added **D34** to docs/decisions.md at
+  the user's request: `coverage: 1.0` across all 3 profiles is measured
+  against bank-frequency fallback keywords (`keyword_corpus` still 0
+  rows, C3's `analyze_job()` orchestrator has never run against real
+  jobs), a materially easier bar than real market demand since a
+  keyword the bank never mentions can't appear in its own frequency
+  list at all; flagged for re-validation once corpus data exists, not
+  presented as a stronger result than it is.
+  Generated and persisted all 3 profiles via `persist_base_resume()`.
+  Hit a real ambiguity first: `ai_ml_engineer/v1/` already existed from
+  the prior session with an identical selection but a now-stale
+  `rubric.json` (still showed pre-D33 `hard_failures: ['R002']`), and
+  spec 09's versioning model says versions are never overwritten.
+  Asked via `AskUserQuestion` rather than guessed, given this both
+  writes new files and inserts real db rows; user chose generating a
+  new `v2` for `ai_ml_engineer` (confirmed byte-identical
+  `selection.yaml` aside from the version field) over leaving v1 stale
+  or touching it. `software_engineer`/`data_scientist` got their first
+  real `v1`. `base_resumes` table: 4 rows total now (`id` 1-4), `id=1`
+  (prior session) untouched, `id` 2/3/4 new this session, all committed
+  to the real `data/jobengine.db`. Hand-wrote all 3 `CHANGELOG.md`s
+  (`persist.py` deliberately doesn't auto-generate them, narrative
+  judgment not mechanically derivable), each documenting its own
+  content decision, known R002/coverage caveats, and pointing at
+  D32/D33/D34.
+  Full suite re-confirmed 328/328, `ruff check` clean, after all bank
+  edits and the rules.py change.
+  Checked off E2 in TODO.md with the full real-numbers writeup.
+  Next: no next task chosen yet, needs explicit go-ahead per the
+  session protocol. Open, unstarted candidates per TODO.md: A4c
+  (watermarking, still no urgency), B1-followup/B3-followup
+  (deliberately deferred), C4 (relevance pre-filter), F1 (review
+  queue). P4 (accept and log to `gap_ledger`) also remains deliberately
+  unbuilt.
 
 - 2026-08-06, E2 (in progress, `ai_ml_engineer` v1 only): First real E2
   work, end to end for one profile. Diagnosed R002's exact failure

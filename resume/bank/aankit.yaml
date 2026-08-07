@@ -155,7 +155,7 @@ roles:
                training"
         keywords: [data processing, large-scale datasets]
         evidence: "internal"
-        profiles: [ai_ml_engineer, data_scientist]
+        profiles: [ai_ml_engineer, data_scientist, software_engineer]
 
       - id: b_utd_03
         status: verified
@@ -432,7 +432,7 @@ roles:
                objectives"
         keywords: [CCSS, skill taxonomy, coverage tracking]
         evidence: "https://github.com/aankitdas/bantrly-lesson-generator"
-        profiles: [ai_ml_engineer, data_scientist]
+        profiles: [ai_ml_engineer]
 
       - id: b_lessongen_05
         status: verified

@@ -105,8 +105,9 @@ CREATE TABLE IF NOT EXISTS job_resume_variants (
     front_load          REAL,
     passed              INTEGER,
     accepted            INTEGER,
-    created_at          TEXT NOT NULL,
-    UNIQUE (base_resume_id, selection_hash)
+    review_status       TEXT NOT NULL DEFAULT 'pending',
+    reviewed_at         TEXT,
+    created_at          TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS rubric_results (
@@ -220,6 +221,29 @@ CREATE INDEX IF NOT EXISTS idx_outcomes_application_occurred ON outcomes (applic
 -- a table rebuild) and safe against the real db's accumulated jobs/companies
 -- data, which this statement never touches.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_job_analysis_job_profile ON job_analysis (job_id, profile);
+
+-- F1: job_resume_variants' only prior uniqueness constraint was
+-- UNIQUE(base_resume_id, selection_hash), which did NOT include job_id
+-- even though job_id is a required NOT NULL column on the same row --
+-- a second job whose patch ladder converged on an identical bullet
+-- selection to an already-inserted job's row would have failed its
+-- insert outright, since the row can only belong to one job_id. Spec
+-- 08's "two jobs whose patches produce identical selections share one
+-- rendered file" means file-level reuse (an app-level lookup in
+-- queue/orchestrate.py's find_job_resume_variant_by_hash(), called
+-- before rendering), not one shared database row. The old table-level
+-- UNIQUE(base_resume_id, selection_hash) constraint was removed from
+-- the CREATE TABLE statement above for exactly this reason -- it's no
+-- longer expressed as a schema constraint at all, only as an app-level
+-- lookup. This index is what now enforces the real row-uniqueness this
+-- table needs: one row per (job_id, profile), matching every other
+-- per-(job,profile) table here (idx_job_analysis_job_profile above,
+-- relevance_scores' own PRIMARY KEY). Removing the old table constraint
+-- against the REAL data/jobengine.db requires a table rebuild (SQLite
+-- can't drop a table-level UNIQUE via ALTER TABLE), handled explicitly
+-- in migrate.py since job_resume_variants has zero real rows today, not
+-- silently assumed safe.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_job_resume_variants_job_profile ON job_resume_variants (job_id, profile);
 
 -- first_seen_at is computed by us and immutable once set (see specs/00-data-model.md
 -- and docs/decisions.md D3). Enforced here, not in Python, so no future caller --

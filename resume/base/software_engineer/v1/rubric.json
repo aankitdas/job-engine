@@ -1,0 +1,49 @@
+{
+  "profile": "software_engineer",
+  "version": 1,
+  "generated_at": "2026-08-07T14:59:24.286833+00:00",
+  "required_keywords": [
+    "LLM",
+    "Python",
+    "RAG",
+    "FastAPI",
+    "automation",
+    "speech-to-text",
+    "Groq",
+    "deployment",
+    "API design",
+    "VAD",
+    "real-time streaming",
+    "audio chunking",
+    "adapter registry",
+    "fallback",
+    "config-driven",
+    "neural networks",
+    "deep learning",
+    "cosmology",
+    "data processing",
+    "large-scale datasets",
+    "Hydra",
+    "hyperparameter sweep",
+    "data workflows",
+    "financial services",
+    "NLP",
+    "OCR",
+    "error handling",
+    "documentation",
+    "reliability",
+    "education technology"
+  ],
+  "preferred_keywords": [],
+  "result": {
+    "passed": true,
+    "score": 66.86538461538461,
+    "hard_failures": [],
+    "deficits": [],
+    "measurements": {
+      "coverage": 1.0,
+      "front_load": 0.4,
+      "pages": 2
+    }
+  }
+}

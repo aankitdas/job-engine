@@ -2,7 +2,10 @@
 pure: given already-computed measurements (or, where the measurement is
 cheap and bank-only, the candidate Bank directly), it returns a Deficit on
 failure or None on pass. score_resume() is the one orchestration point that
-calls measure.py, runs every check, and assembles the spec's JSON shape.
+calls measure.py, runs every check except R002, and assembles the spec's
+JSON shape. R002 (check_r002) is deliberately excluded from the
+hard_failures gate as of D33 in docs/decisions.md; it remains a pure,
+tested function and front_load stays a scored component in score.py.
 
 The patch ladder (P0-P4) is not built here. See TODO.md: D1 is the
 deterministic scorer, D3 is the patch ladder.
@@ -211,7 +214,10 @@ def score_resume(
         d
         for d in (
             check_r001(bank, required_keywords),
-            check_r002(front_load_ratio),
+            # R002 (front-load) is deliberately excluded from hard_failures:
+            # D33 in docs/decisions.md. front_load stays a scored component
+            # (score.py, weight 25) and check_r002() itself is unchanged and
+            # still callable directly; it's just not part of this gate.
             check_r003(bank),
             check_r004(bank),
             check_r005(bank),

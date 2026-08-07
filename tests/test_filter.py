@@ -21,6 +21,7 @@ from jobengine.pipeline.filter import (
     is_us_location,
     load_filter_config,
     matches_profiles,
+    passes_all_filters,
 )
 
 CONFIG_PATH = Path("config/filters.yaml")
@@ -393,3 +394,91 @@ def test_us_location_excludes_and_logs_garbage_location(config):
     job = _job(location_raw="LOCATION", remote=None)
     assert is_us_location(job, config) is False
     assert classify_location(job, config) == "ambiguous_unparseable"
+
+
+# --- passes_all_filters: the full B3 chain in one call, F1's real caller ---
+
+
+def _seed_clean_applied_job(conn) -> int:
+    """Same FK chain as _seed_applied_job, but with a location_raw that
+    would otherwise cleanly pass every other B3 check, isolating
+    is_already_applied as the one thing failing passes_all_filters."""
+    _seed_company(conn)
+    job_id = conn.execute(
+        """
+        INSERT INTO jobs (
+            ats, company_slug, ats_job_id, title, location_raw,
+            first_seen_at, last_seen_at
+        ) VALUES ('greenhouse', 'acme', '2', 'Software Engineer',
+                  'San Francisco, CA',
+                  '2026-08-02T00:00:00+00:00', '2026-08-02T00:00:00+00:00')
+        RETURNING id
+        """
+    ).fetchone()[0]
+    base_resume_id = conn.execute(
+        """
+        INSERT INTO base_resumes (
+            profile, version, selection, section_order, generated_at
+        ) VALUES ('software_engineer', 1, '{}', '[]', '2026-08-02T00:00:00+00:00')
+        RETURNING id
+        """
+    ).fetchone()[0]
+    variant_id = conn.execute(
+        """
+        INSERT INTO job_resume_variants (
+            job_id, profile, base_resume_id, selection_hash, created_at
+        ) VALUES (?, 'software_engineer', ?, 'hash1', '2026-08-02T00:00:00+00:00')
+        RETURNING id
+        """,
+        (job_id, base_resume_id),
+    ).fetchone()[0]
+    conn.execute(
+        """
+        INSERT INTO applications (
+            job_id, resume_variant_id, autonomy_level, status
+        ) VALUES (?, ?, 0, 'submitted')
+        """,
+        (job_id, variant_id),
+    )
+    conn.commit()
+    return job_id
+
+
+def test_passes_all_filters_true_when_job_clears_every_check(conn, config):
+    assert passes_all_filters(conn, _job(), config) is True
+
+
+def test_passes_all_filters_false_when_no_profile_matches(conn, config):
+    job = _job(title="Enterprise Account Executive, Mid Market")
+    assert passes_all_filters(conn, job, config) is False
+
+
+def test_passes_all_filters_false_when_location_not_us(conn, config):
+    job = _job(location_raw="Berlin, Germany")
+    assert passes_all_filters(conn, job, config) is False
+
+
+def test_passes_all_filters_false_when_above_target_seniority(conn, config):
+    # "software engineer" is a substring of "software engineering", so
+    # this still matches the profile alias, isolating the seniority
+    # exclusion as the one thing that should fail it.
+    job = _job(title="Software Engineering Manager")
+    assert passes_all_filters(conn, job, config) is False
+
+
+def test_passes_all_filters_false_when_excluded_employment_type(conn, config):
+    job = _job(title="Software Engineer Intern")
+    assert passes_all_filters(conn, job, config) is False
+
+
+def test_passes_all_filters_false_when_citizenship_or_clearance_required(
+    conn, config
+):
+    job = _job(description="Must be a US citizen due to federal contract work.")
+    assert passes_all_filters(conn, job, config) is False
+
+
+def test_passes_all_filters_false_when_already_applied(conn, config):
+    job_id = _seed_clean_applied_job(conn)
+    job = _job(id=job_id, title="Software Engineer", location_raw="San Francisco, CA")
+    assert passes_all_filters(conn, job, config) is False

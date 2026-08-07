@@ -1,0 +1,54 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Review queue</title>
+  <style>
+    body { font-family: sans-serif; max-width: 900px; margin: 2rem auto; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { text-align: left; padding: 0.4rem 0.6rem; border-bottom: 1px solid #ddd; }
+    .fail { color: #a00; font-weight: bold; }
+    .pass { color: #070; }
+    .new { color: #666; }
+  </style>
+</head>
+<body>
+  <h1>Review queue</h1>
+
+  <h2>Pending review</h2>
+  {% if entries %}
+  <table>
+    <tr><th>Job</th><th>Company</th><th>Profile</th><th>Score</th><th>Rubric</th><th></th></tr>
+    {% for e in entries %}
+    <tr>
+      <td>{{ e.title }}</td>
+      <td>{{ e.company_slug }}</td>
+      <td>{{ e.profile }}</td>
+      <td>{{ "%.1f"|format(e.score) if e.score is not none else "-" }}</td>
+      <td class="{{ 'pass' if e.passed else 'fail' }}">{{ "pass" if e.passed else "fail" }}</td>
+      <td><a href="/jobs/{{ e.job_id }}/{{ e.profile }}">Review</a></td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p>Nothing pending.</p>
+  {% endif %}
+
+  <h2>Not yet reviewed</h2>
+  {% if new_pairs %}
+  <table>
+    <tr><th>Job</th><th>Company</th><th>Profile</th><th></th></tr>
+    {% for job, profile in new_pairs %}
+    <tr class="new">
+      <td>{{ job.title }}</td>
+      <td>{{ job.company_slug }}</td>
+      <td>{{ profile }}</td>
+      <td><a href="/jobs/{{ job.id }}/{{ profile }}">Score and review</a></td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p>No new matches in the last 7 days.</p>
+  {% endif %}
+</body>
+</html>

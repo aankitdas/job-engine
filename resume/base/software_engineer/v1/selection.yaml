@@ -1,0 +1,33 @@
+profile: software_engineer
+version: 1
+section_order:
+- work_history
+- projects
+- education
+- publications
+roles:
+- role_id: role_bantrly
+  bullet_ids:
+  - b_bantrly_01
+  - b_bantrly_02
+  - b_bantrly_03
+- role_id: role_utd_researcher
+  bullet_ids:
+  - b_utd_02
+  - b_utd_05
+- role_id: role_sei
+  bullet_ids:
+  - b_sei_01
+  - b_sei_03
+- role_id: role_bantrly_lessongen
+  bullet_ids:
+  - b_lessongen_01
+  - b_lessongen_02
+  - b_lessongen_03
+  - b_lessongen_05
+- role_id: role_docintel
+  bullet_ids:
+  - b_docintel_01
+  - b_docintel_02
+  - b_docintel_03
+  - b_docintel_05

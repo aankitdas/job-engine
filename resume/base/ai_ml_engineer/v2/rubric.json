@@ -1,0 +1,49 @@
+{
+  "profile": "ai_ml_engineer",
+  "version": 2,
+  "generated_at": "2026-08-07T14:59:23.173425+00:00",
+  "required_keywords": [
+    "LLM",
+    "RAG",
+    "Python",
+    "publication",
+    "FastAPI",
+    "speech-to-text",
+    "embeddings",
+    "cosmology",
+    "machine learning",
+    "segmentation",
+    "computer vision",
+    "optimization",
+    "feature selection",
+    "signal processing",
+    "Groq",
+    "CCSS",
+    "API design",
+    "VAD",
+    "real-time streaming",
+    "audio chunking",
+    "adapter registry",
+    "fallback",
+    "config-driven",
+    "text-to-speech",
+    "evaluation rubric",
+    "LLM-as-judge",
+    "evaluation pipeline",
+    "neural networks",
+    "deep learning",
+    "open-source"
+  ],
+  "preferred_keywords": [],
+  "result": {
+    "passed": true,
+    "score": 63.403614457831324,
+    "hard_failures": [],
+    "deficits": [],
+    "measurements": {
+      "coverage": 1.0,
+      "front_load": 0.5,
+      "pages": 3
+    }
+  }
+}

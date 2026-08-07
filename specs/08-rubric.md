@@ -150,10 +150,17 @@ job entirely if a hard rule other than R001 still fails.
 
 New table `job_resume_variants`: id, job_id, profile, base_resume_id,
 patch_tiers_applied (JSON), bullet_ids (JSON ordered), docx_path, pdf_path,
-score, coverage, front_load, passed, created_at.
+score, coverage, front_load, passed, review_status, reviewed_at, created_at.
+Row uniqueness is (job_id, profile), enforced by
+`idx_job_resume_variants_job_profile`, not by the hash below.
 
-Deduplicate on (base_resume_id, bullet_ids hash). Two jobs whose patches
-produce identical selections share one rendered file.
+Deduplicate on (base_resume_id, bullet_ids hash), but only at the file
+level: before rendering, the caller (F1's `queue/orchestrate.py`) checks
+whether an existing row already has this exact (base_resume_id, hash)
+pair and, if so, reuses that row's docx_path/pdf_path instead of
+rendering again. Two jobs whose patches produce identical selections
+share one rendered file, but each still gets its own row, since job_id
+is required on every row.
 
 ## CLI
 ```

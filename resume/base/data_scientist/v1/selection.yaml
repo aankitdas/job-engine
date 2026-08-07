@@ -1,0 +1,36 @@
+profile: data_scientist
+version: 1
+section_order:
+- work_history
+- projects
+- education
+- publications
+roles:
+- role_id: role_bantrly
+  bullet_ids:
+  - b_bantrly_04
+  - b_bantrly_05
+- role_id: role_utd_researcher
+  bullet_ids:
+  - b_utd_01
+  - b_utd_02
+  - b_utd_04
+- role_id: role_sei
+  bullet_ids:
+  - b_sei_01
+  - b_sei_02
+  - b_sei_03
+  - b_sei_04
+- role_id: role_unl
+  bullet_ids:
+  - b_unl_01
+  - b_unl_02
+  - b_unl_03
+- role_id: role_ju
+  bullet_ids:
+  - b_ju_01
+  - b_ju_02
+- role_id: role_docintel
+  bullet_ids:
+  - b_docintel_04
+  - b_docintel_06

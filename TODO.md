@@ -344,12 +344,78 @@ Snapshot history cannot be backfilled.
   brief. Live-verified against the real db (confirmed read-only,
   unchanged) and real bank for all 3 profiles, not just unit-tested; see
   D31 in docs/decisions.md.)
-- [ ] **E2. Generate all 3 base resumes** (interactive session, not automated)
+- [x] **E2. Generate all 3 base resumes** (interactive session, not automated)
   Done: each passes the full rubric at coverage >= 0.80.
+  (Done 2026-08-07: `resume/base/{ai_ml_engineer,software_engineer,
+  data_scientist}/v1/` all exist (`ai_ml_engineer` also has a `v2`, see
+  below), each with `selection.yaml`/`resume.docx`/`resume.pdf`/
+  `rubric.json`/`CHANGELOG.md`. All 3 real-scored `passed: true,
+  hard_failures: []`, `coverage: 1.0`. Two real content decisions
+  preceded generation, each grounded by reviewing every bullet on the
+  affected role before deciding, not guessed: `role_utd_researcher`
+  retagged `b_utd_02` onto `software_engineer` (the least
+  ML-research-specific of its 5 bullets) to clear its R003/R013 floor;
+  `role_bantrly_lessongen` dropped from `data_scientist` selection
+  entirely (removed `b_lessongen_04`'s tag rather than force a second,
+  ill-fitting tag) after review showed none of its 5 bullets read as
+  genuine data-science work. Separately, R002 (front-load) was demoted
+  from a hard failure to a scored-only component (D33,
+  docs/decisions.md) after two exhaustive investigations,
+  `ai_ml_engineer` in D32 and `software_engineer` this session, both
+  found the same real structural ceiling with no legitimate fix; R001/
+  R006/R003 were reviewed against the same reasoning and deliberately
+  left as hard failures, evidence-gated not pattern-matched. `ai_ml_
+  engineer`'s pre-existing v1 (generated before D33) was left untouched
+  per spec 09's "never overwritten" versioning; v2 carries the corrected
+  post-D33 rubric.json with identical selection, confirmed by diff.
+  **Known caveat, not silently carried:** `coverage: 1.0` for all 3 is
+  measured against bank-frequency fallback keywords, not real
+  `keyword_corpus` data (still 0 rows, no orchestrator has run
+  `analyze_job()` against live jobs). This is a materially easier bar
+  than real market demand; flagged for re-validation once corpus data
+  exists, see D34 in docs/decisions.md. Full suite 328/328, ruff clean.)
 
 ## Phase F: Interface
 
-- [ ] **F1. FastAPI review queue**
+- [x] **F1. FastAPI review queue**
+  (Done 2026-08-07: no dedicated spec file existed for this item, see
+  D35 in docs/decisions.md for why this session's approved plan serves
+  as its design document. `src/jobengine/queue/orchestrate.py`
+  (`QueueContext`, `ensure_reviewed()` lazily triggers C3 extraction +
+  D3/D4 patch ladder per (job, profile) pair, `approve()`/`reject()`,
+  `list_queue()`) + `src/jobengine/web/app.py` (FastAPI, `GET /`, `GET
+  /jobs/{job_id}/{profile}`, `POST .../approve`, `POST .../reject`,
+  Jinja2 templates, `uv run uvicorn jobengine.web.app:app --reload`).
+  Two real bugs found and fixed before/during implementation, not after
+  shipping: (1) the original applications-table-based review-state
+  design would have corrupted B3's shipped `is_already_applied()`
+  filter, fixed by moving review state onto new `job_resume_variants.
+  review_status`/`reviewed_at` columns instead; (2) `job_resume_
+  variants`' old `UNIQUE(base_resume_id, selection_hash)` constraint
+  blocked the exact multi-job dedup spec 08 describes, fixed via a real
+  schema.sql change plus new table-rebuild migration logic in
+  `migrate.py` (this project's first migration beyond idempotent
+  `CREATE ... IF NOT EXISTS`). Applied to the real `data/jobengine.db`
+  only after explicit confirmation per hard rule 13. Verified end to
+  end against the real running app and real db using this session's own
+  real job (id 3871, Airbnb Software Engineer): on-screen numbers
+  matched the pre-computed worked example exactly, second visit was
+  idempotent (0.01s, zero new model calls), reject worked and the job
+  dropped off the list. First-ever real `job_analysis`/`keyword_corpus`/
+  `job_resume_variants`/`rubric_results` rows this project has written
+  outside a scratch copy. 42 new tests (`test_db.py` +12,
+  `test_db_migrate.py` +9 new file, `test_queue_orchestrate.py` +7 new
+  file, `test_web_app.py` +8 new file, plus a shared helper), written
+  before implementation per hard rule 7. Full suite 370/370, ruff
+  clean. Full writeup: D35, docs/decisions.md.
+  **Follow-up, same session:** added `passes_all_filters(conn, job,
+  config) -> bool` to `pipeline/filter.py` (B3's full chain in one
+  call: title match, location, seniority, employment type,
+  citizenship/clearance, already-applied) and wired it into
+  `web/app.py`'s `_new_pairs()`, closing the known gap where the "not
+  yet reviewed" list only reapplied the title check. 9 new tests
+  (`test_filter.py` +7, `test_web_app.py` +2), tests-first. Full suite
+  379/379, ruff clean.)
 - [ ] **F2. Metrics dashboard** (funnel, response rate by coverage bucket,
       by time-to-apply, by base resume version)
 - [ ] **F3. Telegram notifier**

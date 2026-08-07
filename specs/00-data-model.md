@@ -77,9 +77,15 @@ versions.
 ### job_resume_variants
 id, job_id, profile, base_resume_id, patch_tiers_applied (JSON), bullet_ids
 (JSON ordered), selection_hash, docx_path, pdf_path, score, coverage,
-front_load, passed, accepted, created_at.
-Deduplicate on (base_resume_id, selection_hash): two jobs whose patches produce
-identical selections share one rendered file.
+front_load, passed, accepted, review_status, reviewed_at, created_at.
+Row uniqueness is (job_id, profile): every job gets its own row. Dedup on
+(base_resume_id, selection_hash) is file-level reuse only, applied by the
+caller before rendering: two jobs whose patches produce identical
+selections skip a redundant render and point their own rows at the same
+already-rendered docx/pdf. (F1 found the earlier wording ambiguous: the
+table's row uniqueness and the file-reuse dedup key are not the same
+thing, and job_id must stay on every row regardless of which file it
+points at.)
 
 ### rubric_results
 id, job_resume_variant_id, rule_id, passed, measurement (REAL), detail,

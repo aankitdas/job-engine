@@ -1136,3 +1136,199 @@ application outcomes (once F1's review queue and outcome tracking exist)
 show R002 specifically correlating with worse response rates for this
 profile, the same evidence bar D27 itself set, not a preemptive
 guess.
+
+---
+
+**D33. R002 (front-loading) demoted from a hard failure to a scored-only
+component. R001 and R006 reviewed against the same reasoning and
+deliberately left as hard failures.**
+
+rules.py's check_r002 is removed from score_resume()'s hard_failures list.
+front_load remains exactly as weighted in score.py (25 of 100 points) and
+in measurements output; no signal is lost, only the binary gate on top of
+an already-continuous measurement.
+
+**Evidence, not symmetry, is why only R002 moves.** Two independent,
+exhaustive investigations, on two different profiles, each tried every
+legitimate lever (P0-P2 automatic ladder, manual structural promotion,
+fact-preserving content trims) and found the same structural ceiling:
+front_load is a fixed-space allocation over a fixed top-half-of-page-1
+budget, not a rank order, so reorders redistribute which keywords occupy
+that space rather than creating more of it. ai_ml_engineer: D32, 0.50
+ceiling. software_engineer: this session, 0.40 ceiling, R003/R013 cleared
+via a legitimate retag but front_load unmoved. In both cases every tested
+path past the ceiling either nets worse (structural promotions) or costs
+real content (cutting a passing keyword to buy another).
+
+**Why R002 specifically, and not by pattern-matching on rule shape.**
+Reviewed all 13 hard rules for the same "continuous measurement forced
+into a threshold" shape R002 has. R001 (coverage) shares it exactly, spec
+08 gives it its own continuous scored twin same as R002, and P4's own
+spec text ("skip the job entirely if a hard rule other than R001 still
+fails") already treats R001 as different-in-kind from the rest of the
+hard-failure list. R006 (line count) is architecturally R002's closest
+sibling: same pdfplumber-derived geometry, same soft-convention-as-cutoff
+shape. Neither is touched here. Both lack what R002 now has: a real,
+exhaustive, two-case investigation showing a genuine ceiling with no
+legitimate fix, not just a plausible argument by analogy. R001 in
+particular carries D27's existing precedent toward strictness
+("under-extraction is a safe failure direction") and is the system's only
+gate against a resume that doesn't cover the job's keywords at all;
+demoting it preemptively would remove real protection on pattern-matching
+alone. R003 was also reviewed and rejected as a candidate: it's a bounded
+count with no continuous twin in score.py, and its bounds encode a
+genuine structural convention (a 1-bullet role looks incomplete, a
+12-bullet role looks unedited), not a proxy measurement squeezed into
+pass/fail.
+
+Revisit R001 or R006 only if a future case does the same exhaustive-
+investigation work this one did for R002 and finds the same kind of real,
+unfixable ceiling, not by extending this decision's reasoning alone.
+
+---
+
+**D34. E2's coverage=1.0 across all three profiles is measured against
+bank-frequency fallback keywords, not real market demand, and needs
+re-validation once corpus data exists.**
+
+All three profiles (ai_ml_engineer, software_engineer, data_scientist)
+reached `passed: True, coverage: 1.0` this session via `profiles brief`'s
+`_top_corpus_keywords()`. That function's first choice is real
+`keyword_corpus` rows (C3's actual extraction output against real JDs);
+today it falls back to the bank's own keyword frequency for every
+profile, because `keyword_corpus` has zero rows for any profile (no
+daily pipeline orchestrator has ever called
+`pipeline.extract.analyze_job()` against a real job, a gap already
+flagged under C3 and E1 in PROGRESS.md's Known Issues, unchanged by
+anything done this session).
+
+**This makes coverage=1.0 an easier bar than it looks, structurally, not
+just by chance.** Bank-frequency fallback builds its "required keywords"
+list from the same bank the candidate resume is selected from, so a
+resume scored this way is being measured against its own vocabulary, not
+the market's. Coverage against real corpus keywords, drawn from actual
+job postings this profile competes against, is a materially different
+and harder bar: a keyword the bank never mentions can't appear in the
+bank-frequency top list at all, but it can absolutely appear in a real
+JD's top-10.
+
+**Legitimate first pass, not a result to distrust, but not the real
+number either.** Every rubric investigation this session (R002's
+demotion, the `role_utd_researcher`/`role_bantrly_lessongen` retag and
+drop decisions) was grounded in real rendering and real PDF geometry;
+none of that is in question. What's specifically unvalidated is only the
+keyword list coverage is measured against. E2's spec 09 DoD text
+("coverage above 0.80") does not specify against which keyword source,
+so this isn't a DoD violation, but it is a gap worth tracking honestly
+rather than letting "coverage: 1.0" read as a stronger claim than it is.
+
+Re-validate once C3's extraction orchestrator has run `analyze_job()`
+against a real batch of live jobs per profile and `keyword_corpus` has
+real rows (the same precondition D31/E1 already flagged as blocking the
+brief's "real" mode). Re-run each profile's `profiles brief` at that
+point; if coverage drops meaningfully below 0.80 against real corpus
+keywords, that's new information this session's numbers could not have
+surfaced, not a regression.
+
+---
+
+**D35. F1 (review queue) ships with no dedicated spec file, a lazy
+per-job trigger instead of a batch orchestrator, and review state on
+`job_resume_variants` rather than `applications` after a real filter
+conflict was found and fixed during implementation.**
+
+No `specs/10-*.md` exists for F1: TODO.md's own Rules section deferred
+writing Phase F specs until Phase D ran on real data, which it now has,
+but nobody had written one when this session started. This plan
+(written in Claude Code's plan mode, approved before implementation)
+functions as that document; `docs/architecture.md`'s existing stage list
+(review as stage 8, after re-score+lint, before apply) was the only
+prior design intent and is consistent with what shipped.
+
+**Scope, confirmed by asking, not assumed:** F1 triggers C3 extraction
+and the D3/D4 patch ladder itself, lazily, the first time a reviewer
+opens a specific (job, profile) pair (`queue/orchestrate.py`'s
+`ensure_reviewed()`). No batch/cron orchestrator was built. This was a
+real three-way fork (lazy-trigger vs. UI-only assuming a future batch
+job vs. building a real batch orchestrator now) resolved via
+AskUserQuestion before any code was written, since building the "real"
+scheduled version properly would need C4 (relevance pre-filter, not
+built) for stage 2.5's ranking cut first.
+
+**A real bug was found and fixed before it ever shipped, not after.**
+The initial implementation plan (drafted by a planning sub-agent)
+proposed tracking review state (`pending_review`/`approved`/`rejected`)
+as rows in the `applications` table. Checked against the actual
+`is_already_applied()` implementation
+(`src/jobengine/pipeline/filter.py:163`, B3's own shipped filter)
+before accepting that design: it treats **any** row in `applications`
+for a `job_id` as "already applied," regardless of `status`. Creating an
+`applications` row the moment a job entered the queue would have
+silently and permanently marked every reviewed-but-not-yet-applied job,
+and every rejected one, as "already applied" to any future B3 filter
+pass. Fixed before implementation: review state moved onto
+`job_resume_variants` itself (`review_status`/`reviewed_at`, new
+columns), and `applications` rows are now created **only** on approval,
+leaving `is_already_applied()` untouched and correct. A regression test
+(`test_creating_a_pending_review_variant_does_not_mark_job_already_applied`,
+`tests/test_db.py`) exists specifically so this can't regress silently.
+
+**A second real gap was found by the tests written to prove the fix,
+not by inspection alone.** `job_resume_variants`' only prior uniqueness
+constraint, `UNIQUE(base_resume_id, selection_hash)` (no `job_id`),
+would have rejected a second job's insert outright if its patch ladder
+converged on an identical bullet selection to an already-inserted job's
+row, contradicting spec 08's own "two jobs... share one rendered file"
+intent. The fix (a new `UNIQUE(job_id, profile)` index, matching every
+other per-(job,profile) table in the schema, plus dropping the old
+table-level constraint entirely so hash-collision across jobs is
+possible again) required a genuine SQLite table rebuild for any db that
+predates this change, not just an additive `CREATE INDEX`: `migrate.py`
+gained real detect-old-shape-and-rebuild logic
+(`_rebuild_job_resume_variants_if_needed()`), the first migration this
+project has needed beyond idempotent `CREATE ... IF NOT EXISTS`
+statements. Verified via a dedicated test file
+(`tests/test_db_migrate.py`) that reconstructs the exact pre-migration
+table shape via raw SQL and confirms rows survive the rebuild,
+`review_status`/`reviewed_at` are added, the old constraint no longer
+blocks a shared hash across two jobs, and the new per-(job,profile)
+uniqueness still holds. Applied to the real `data/jobengine.db` only
+after explicit confirmation (hard rule 13); `job_resume_variants` had 0
+real rows at migration time, so the rebuild copied nothing.
+
+**A third real bug, found only by running the real app, not by any
+test:** FastAPI runs sync route handlers and sync `Depends()` callables
+in a threadpool by default, even for `async def` routes, so a single
+shared `sqlite3.Connection` built once at startup gets used from a
+different OS thread on every request. `sqlite3.Connection` objects
+reject cross-thread use by default (`ProgrammingError`). Fixed by adding
+an explicit `check_same_thread` parameter to
+`jobengine.db.migrate.connect()` (default `True`, preserving every
+other single-threaded caller's existing safety net), with only
+`jobengine.web.app` passing `check_same_thread=False`. Documented as
+safe for this app's actual single-operator, one-browser usage, not as a
+general concurrency guarantee.
+
+**Verified end to end against the real running app and the real db, not
+just the automated suite**, using this session's own real worked
+example (job_id 3871, Airbnb "Software Engineer, Biztech Client and
+Identity", already confirmed to survive B3 for `software_engineer`):
+started `uv run uvicorn jobengine.web.app:app` against the real
+`data/jobengine.db`, hit `/jobs/3871/software_engineer` live. First
+visit: ~22s (matches C1's documented Ollama cold-start latency), real
+`analyze_job()` and real `run_ladder()` fired for real, on-screen
+numbers matched the plan's own pre-computed worked example exactly
+(score 18.98, coverage 0.14, `hard_failures: ['R001']`, all four patch
+tiers attempted). Second visit: 0.01s, byte-identical HTML, zero new
+model calls, confirming the lazy-trigger idempotency. `POST .../reject`
+returned 303, flipped `review_status` to `rejected`, created no
+`applications` row (confirming the filter-conflict fix holds for real,
+not just in a test), and the job dropped off `GET /`. This is also the
+first-ever real `job_analysis`, `keyword_corpus`, and
+`job_resume_variants`/`rubric_results` rows this project has ever
+written to `data/jobengine.db` outside a scratch copy, closing several
+gaps PROGRESS.md's Known Issues had flagged since C3/E1
+("no daily orchestrator has ever called `analyze_job()` against real
+jobs").
+
+Full suite 370/370 (up from 328), `ruff check`/`format --check` clean.

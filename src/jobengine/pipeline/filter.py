@@ -231,3 +231,27 @@ def classify_location(job: Job, config: FilterConfig) -> str:
 
 def is_us_location(job: Job, config: FilterConfig) -> bool:
     return classify_location(job, config) in ("remote", "us_match")
+
+
+def passes_all_filters(
+    conn: sqlite3.Connection, job: Job, config: FilterConfig
+) -> bool:
+    """B3's full deterministic chain in one call: matches at least one
+    profile AND clears every exclusion check (location, seniority,
+    employment type, citizenship/clearance, already-applied). Every
+    individual check above has always been callable on its own; this is
+    the first place anything needed "does this job actually survive B3
+    end to end," not just one check in isolation. First real caller:
+    F1's queue-listing logic (src/jobengine/web/app.py), which previously
+    only reapplied the title check via matches_profiles() alone."""
+    if not matches_profiles(job, config):
+        return False
+    if not is_us_location(job, config):
+        return False
+    if is_above_target_seniority(job.title, config):
+        return False
+    if is_excluded_employment_type(job, config):
+        return False
+    if is_citizenship_or_clearance_required(job.description, config):
+        return False
+    return not is_already_applied(conn, job.id)

@@ -102,6 +102,63 @@ class BaseResume(BaseModel):
     retired_at: str | None = None
 
 
+class JobResumeVariant(BaseModel):
+    id: int | None = None
+    job_id: int
+    profile: str
+    base_resume_id: int
+    patch_tiers_applied: str | None = None
+    bullet_ids: str | None = None
+    selection_hash: str
+    docx_path: str | None = None
+    pdf_path: str | None = None
+    score: float | None = None
+    coverage: float | None = None
+    front_load: float | None = None
+    passed: bool | None = None
+    accepted: bool | None = None
+    review_status: str = "pending"
+    reviewed_at: str | None = None
+    created_at: str
+
+
+class RubricResultRow(BaseModel):
+    id: int | None = None
+    job_resume_variant_id: int
+    rule_id: str
+    passed: bool
+    measurement: float | None = None
+    detail: str | None = None
+    evaluated_at: str
+
+
+class Application(BaseModel):
+    id: int | None = None
+    job_id: int
+    resume_variant_id: int
+    autonomy_level: int = 0
+    status: str
+    submitted_at: str | None = None
+    payload_path: str | None = None
+    screenshot_path: str | None = None
+    confirmation_path: str | None = None
+    notes: str | None = None
+
+
+class QueueEntry(BaseModel):
+    """One row for F1's queue list view: a job_resume_variant joined
+    with its job. Presentation-shaped, not a schema table."""
+
+    variant_id: int
+    job_id: int
+    profile: str
+    title: str
+    company_slug: str
+    score: float | None = None
+    passed: bool | None = None
+    review_status: str
+
+
 def upsert_company(conn: sqlite3.Connection, company: Company) -> None:
     """Insert a company, or update it on (slug, ats) conflict.
 
@@ -179,6 +236,13 @@ def get_job(
         "SELECT * FROM jobs WHERE ats = ? AND company_slug = ? AND ats_job_id = ?",
         (ats, company_slug, ats_job_id),
     ).fetchone()
+    if row is None:
+        return None
+    return Job(**dict(row))
+
+
+def get_job_by_id(conn: sqlite3.Connection, job_id: int) -> Job | None:
+    row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
     if row is None:
         return None
     return Job(**dict(row))
@@ -367,3 +431,156 @@ def latest_base_resume_version(conn: sqlite3.Connection, profile: str) -> int:
         "SELECT MAX(version) AS v FROM base_resumes WHERE profile = ?", (profile,)
     ).fetchone()
     return row["v"] or 0
+
+
+def latest_base_resume(conn: sqlite3.Connection, profile: str) -> BaseResume | None:
+    """The full latest row (id included), for callers like queue/orchestrate.py
+    that need the FK, not just the version number latest_base_resume_version()
+    returns."""
+    row = conn.execute(
+        "SELECT * FROM base_resumes WHERE profile = ? ORDER BY version DESC LIMIT 1",
+        (profile,),
+    ).fetchone()
+    if row is None:
+        return None
+    return BaseResume(**dict(row))
+
+
+def insert_job_resume_variant(
+    conn: sqlite3.Connection, variant: JobResumeVariant
+) -> int:
+    """Append-only: one row per (job_id, profile), enforced by
+    idx_job_resume_variants_job_profile in schema.sql, not by this
+    function. Callers (queue/orchestrate.py) check
+    get_job_resume_variant() first; a duplicate insert here is a caller
+    bug, not something this function silently upserts around."""
+    cursor = conn.execute(
+        """
+        INSERT INTO job_resume_variants (
+            job_id, profile, base_resume_id, patch_tiers_applied, bullet_ids,
+            selection_hash, docx_path, pdf_path, score, coverage, front_load,
+            passed, accepted, review_status, reviewed_at, created_at
+        ) VALUES (
+            :job_id, :profile, :base_resume_id, :patch_tiers_applied, :bullet_ids,
+            :selection_hash, :docx_path, :pdf_path, :score, :coverage, :front_load,
+            :passed, :accepted, :review_status, :reviewed_at, :created_at
+        )
+        RETURNING id
+        """,
+        variant.model_dump(exclude={"id"}),
+    )
+    return cursor.fetchone()[0]
+
+
+def get_job_resume_variant(
+    conn: sqlite3.Connection, job_id: int, profile: str
+) -> JobResumeVariant | None:
+    row = conn.execute(
+        "SELECT * FROM job_resume_variants WHERE job_id = ? AND profile = ?",
+        (job_id, profile),
+    ).fetchone()
+    if row is None:
+        return None
+    return JobResumeVariant(**dict(row))
+
+
+def find_job_resume_variant_by_hash(
+    conn: sqlite3.Connection, base_resume_id: int, selection_hash: str
+) -> JobResumeVariant | None:
+    """The file-reuse lookup: is there already a rendered docx/pdf for
+    this exact (base_resume_id, selection_hash) pair, from some other
+    job? See D-something in docs/decisions.md and schema.sql's comment
+    above idx_job_resume_variants_job_profile for why this is an
+    app-level lookup rather than the table's row-uniqueness constraint."""
+    row = conn.execute(
+        "SELECT * FROM job_resume_variants "
+        "WHERE base_resume_id = ? AND selection_hash = ? LIMIT 1",
+        (base_resume_id, selection_hash),
+    ).fetchone()
+    if row is None:
+        return None
+    return JobResumeVariant(**dict(row))
+
+
+def update_review_status(
+    conn: sqlite3.Connection, variant_id: int, status: str, reviewed_at: str
+) -> None:
+    conn.execute(
+        "UPDATE job_resume_variants SET review_status = ?, reviewed_at = ? "
+        "WHERE id = ?",
+        (status, reviewed_at, variant_id),
+    )
+
+
+def insert_rubric_results(
+    conn: sqlite3.Connection, results: list[RubricResultRow]
+) -> None:
+    conn.executemany(
+        """
+        INSERT INTO rubric_results (
+            job_resume_variant_id, rule_id, passed, measurement, detail, evaluated_at
+        ) VALUES (
+            :job_resume_variant_id, :rule_id, :passed, :measurement, :detail, :evaluated_at
+        )
+        """,
+        [r.model_dump(exclude={"id"}) for r in results],
+    )
+
+
+def get_rubric_results(
+    conn: sqlite3.Connection, job_resume_variant_id: int
+) -> list[RubricResultRow]:
+    rows = conn.execute(
+        "SELECT * FROM rubric_results WHERE job_resume_variant_id = ?",
+        (job_resume_variant_id,),
+    ).fetchall()
+    return [RubricResultRow(**dict(row)) for row in rows]
+
+
+def insert_application(conn: sqlite3.Connection, application: Application) -> int:
+    """Created only on review approval (queue/orchestrate.py never calls
+    this) -- see docs/decisions.md's F1 entry for why applications rows
+    don't exist for pending/rejected review state: is_already_applied()
+    (pipeline/filter.py) checks for any applications row regardless of
+    status, so creating one earlier than a real approval would silently
+    corrupt that already-shipped B3 filter."""
+    cursor = conn.execute(
+        """
+        INSERT INTO applications (
+            job_id, resume_variant_id, autonomy_level, status, submitted_at,
+            payload_path, screenshot_path, confirmation_path, notes
+        ) VALUES (
+            :job_id, :resume_variant_id, :autonomy_level, :status, :submitted_at,
+            :payload_path, :screenshot_path, :confirmation_path, :notes
+        )
+        RETURNING id
+        """,
+        application.model_dump(exclude={"id"}),
+    )
+    return cursor.fetchone()[0]
+
+
+def list_pending_review_queue(conn: sqlite3.Connection) -> list[QueueEntry]:
+    rows = conn.execute(
+        """
+        SELECT
+            v.id AS variant_id, v.job_id AS job_id, v.profile AS profile,
+            j.title AS title, j.company_slug AS company_slug,
+            v.score AS score, v.passed AS passed, v.review_status AS review_status
+        FROM job_resume_variants v
+        JOIN jobs j ON j.id = v.job_id
+        WHERE v.review_status = 'pending'
+        ORDER BY v.created_at DESC
+        """
+    ).fetchall()
+    return [QueueEntry(**dict(row)) for row in rows]
+
+
+def list_existing_variant_pairs(conn: sqlite3.Connection) -> set[tuple[int, str]]:
+    """Every (job_id, profile) pair that already has a job_resume_variant
+    row, any review_status. Used by the queue list route to tell which
+    B3-surviving pairs are genuinely new (never triggered) versus
+    already pending/approved/rejected, so a decided job doesn't
+    reappear as "new" once it's been reviewed."""
+    rows = conn.execute("SELECT job_id, profile FROM job_resume_variants").fetchall()
+    return {(row["job_id"], row["profile"]) for row in rows}

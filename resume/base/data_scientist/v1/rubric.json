@@ -1,0 +1,49 @@
+{
+  "profile": "data_scientist",
+  "version": 1,
+  "generated_at": "2026-08-07T14:59:25.484199+00:00",
+  "required_keywords": [
+    "publication",
+    "Python",
+    "LLM",
+    "embeddings",
+    "cosmology",
+    "machine learning",
+    "automation",
+    "NLP",
+    "segmentation",
+    "computer vision",
+    "optimization",
+    "feature selection",
+    "signal processing",
+    "FastAPI",
+    "speech-to-text",
+    "text-to-speech",
+    "evaluation rubric",
+    "LLM-as-judge",
+    "evaluation pipeline",
+    "neural networks",
+    "deep learning",
+    "open-source",
+    "data processing",
+    "large-scale datasets",
+    "ablation study",
+    "hyperparameter tuning",
+    "data workflows",
+    "financial services",
+    "OCR",
+    "Alteryx"
+  ],
+  "preferred_keywords": [],
+  "result": {
+    "passed": true,
+    "score": 66.95588235294117,
+    "hard_failures": [],
+    "deficits": [],
+    "measurements": {
+      "coverage": 1.0,
+      "front_load": 0.4,
+      "pages": 2
+    }
+  }
+}
