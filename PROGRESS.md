@@ -3,112 +3,79 @@
 **Claude Code: read this file at the start of every session and update it at
 the end via `/checkpoint`. Do not rely on memory of previous sessions.**
 
-Last updated: 2026-08-07
-Current task: **F1 (review queue) is done.** No dedicated spec file
-existed for it (TODO.md's own Rules section deferred writing Phase F
-specs until Phase D ran on real data; nobody had written one when this
-session started) — this session's Claude Code plan-mode plan, approved
-before any code was written, is F1's design document; see D35 in
-docs/decisions.md for the full writeup, only summarized here.
-Built `src/jobengine/queue/orchestrate.py` (`QueueContext`,
-`ensure_reviewed()`: lazily triggers C3 extraction + the D3/D4 patch
-ladder the first time a reviewer opens a specific (job, profile) pair,
-zero batch/cron orchestrator, `approve()`/`reject()`, `list_queue()`)
-and `src/jobengine/web/app.py` (FastAPI: `GET /`, `GET /jobs/{job_id}/
-{profile}`, `POST .../approve`, `POST .../reject`; Jinja2 templates;
-`uv run uvicorn jobengine.web.app:app --reload`, CLAUDE.md's
-already-documented dev command, now real). The lazy-trigger-not-batch
-scope was a genuine 3-way fork resolved via `AskUserQuestion` before any
-code: a real batch orchestrator would need C4 (relevance pre-filter,
-not built) for a proper survivor cut first.
-**Two real bugs found and fixed before/during implementation, not
-after shipping, each caught by verification, not assumed correct:**
-(1) the first-drafted design (from a planning sub-agent) tracked review
-state as `applications` rows, which would have silently corrupted B3's
-already-shipped `is_already_applied()` filter (it treats *any*
-`applications` row for a `job_id` as "already applied," regardless of
-`status`) — caught by reading that function directly before accepting
-the design, fixed by moving review state onto new `job_resume_variants.
-review_status`/`reviewed_at` columns instead, `applications` rows now
-created only on approval; (2) `job_resume_variants`' old
-`UNIQUE(base_resume_id, selection_hash)` constraint (no `job_id`) would
-have rejected a second job's insert outright if its patch ladder
-converged on an identical selection to an already-inserted job's row,
-contradicting spec 08's own multi-job file-reuse dedup intent — caught
-by a test written before implementation, fixed via a real schema change
-(`UNIQUE(job_id, profile)` instead) plus genuine table-rebuild migration
-logic in `migrate.py` (this project's first migration beyond idempotent
-`CREATE ... IF NOT EXISTS`, needed since removing a table-level
-constraint isn't expressible as one). A third bug (FastAPI running sync
-routes/`Depends()` in a threadpool, breaking `sqlite3`'s default
-same-thread requirement) was found only by running the real app, fixed
-via a new `check_same_thread` parameter on `connect()`, defaulted `True`
-everywhere except `jobengine.web.app`.
-**The real db migration was applied only after asking and getting
-explicit confirmation** (hard rule 13): `job_resume_variants` had 0 real
-rows at the time, so the rebuild copied nothing. Verified read-only
-afterward (new index present, old constraint gone, row counts
-unchanged, both schema versions recorded), then verified end to end
-against the real running app and real db using this session's own real
-worked example (job_id 3871, Airbnb "Software Engineer, Biztech Client
-and Identity", already confirmed to survive B3 for `software_engineer`):
-first visit ~22s (real Ollama cold start), on-screen numbers matched
-the plan's pre-computed worked example exactly (score 18.98, coverage
-0.14, `hard_failures: ['R001']`, all four patch tiers attempted);
-second visit 0.01s, byte-identical HTML, zero new model calls; reject
-returned 303, flipped `review_status`, created no `applications` row,
-and the job dropped off `GET /`. This is also the first-ever real
-`job_analysis`, `keyword_corpus`, `job_resume_variants`, and
-`rubric_results` rows this project has written to `data/jobengine.db`
-outside a scratch copy, closing gaps flagged since C3/E1 ("no daily
-orchestrator has ever called `analyze_job()` against real jobs").
-42 new tests, written before implementation per hard rule 7
-(`test_db.py` +12, `test_db_migrate.py` +9 new file,
-`test_queue_orchestrate.py` +7 new file, `test_web_app.py` +8 new
-file).
-**Follow-up in this same session, after F1's initial close:** added
-`passes_all_filters(conn, job, config) -> bool` to `pipeline/filter.py`
-(B3's full deterministic chain — title match, location, seniority,
-employment type, citizenship/clearance, already-applied — in one call,
-tests-first) and wired it into `web/app.py`'s `_new_pairs()`, replacing
-the title-only check the "not yet reviewed" list previously used. 9
-more new tests (`test_filter.py` +7, `test_web_app.py` +2). Also
-recorded a real finding from a live read-only db check: the Task
-Scheduler entry behind B2 stopped firing unattended sometime after
-`2026-08-03T20:00` and has failed silently since (root cause and fix
-identified, not yet applied — see Known Issues and the paragraph
-below).
-`uv run pytest` 379/379 (up from 328 at session start), `ruff
-check`/`format --check` clean.
+Last updated: 2026-08-11
+Current task: **C4 (relevance pre-filter) is done.** Closed on the same
+mirrored precedent as C3/D27: the literal TODO.md gate (spec 07's Task 1
+numeric eval, rho >= 0.70 and top-30 overlap >= 0.75 per profile) does
+**not** pass — real numbers, all three profiles: rho 0.23-0.35, overlap
+0.63-0.70. But spec 06's own DoD (a full unbounded production run +
+`calibrate` >= 70% agreement) **does** pass, on real production data:
+921 real `relevance_scores` rows across 854 real B3-surviving jobs
+(1h46m, zero hangs), and the user's own live `calibrate --profile
+software_engineer` run scored 20/20 = 100% agreement with the model's
+real reasoning. Both numbers are recorded, not just the flattering one;
+see D36 in docs/decisions.md for the full writeup.
+Built `src/jobengine/pipeline/relevance.py` (`RelevanceSchema`,
+`build_profile_card()`/`render_profile_card()`, `score_relevance()`,
+`score_job()`, `select_top_n()`/`apply_relevance_cutoff()`, the
+`score`/`calibrate` CLI per spec 06's literal invocation),
+`db/models.py`'s `RelevanceScore` + 5 helpers, new `config/
+relevance.yaml` (`disqualifier_blocklist`, `freshness_window_days`, both
+deferred/`null` per the same D23 reasoning as `daily_cap`), and
+`eval/tasks/relevance.py` (Task 1, hand-rolled Spearman rho, no new
+dependency) wired into the existing eval harness alongside Task 2.
+Confirmed by construction, not just claimed: "relevance" was already a
+first-class `Stage` in `llm/schemas.py`/`config/llm.toml` before this
+session, so C4 needed zero changes to `router.py`/`providers/local.py`
+to reuse the router/`think=false` convention.
+**Three real bugs found and fixed during this session, none left as
+theoretical risk:** (1) the first live-model prototype hung 13+ minutes;
+root-caused by re-running the same escalating sizes against the real
+shipped `RelevanceSchema` (properly `Literal`/`Field`-constrained,
+unlike the ad hoc prototype schema) — zero hangs at any size, 5-16s per
+call including spec 06's full 6k-char/30-keyword shape; added an
+`asyncio.wait_for` timeout to `score_relevance()` anyway as defense in
+depth. (2) `score_job()` gated only on title match, not B3's full
+filter chain — a real count against the live db (1049 title-matches vs.
+854 full-chain survivors) showed this would have wasted ~195 real LLM
+calls before the expensive production run even started; fixed to gate
+on `passes_all_filters()` first. (3) Real relocation-requiring US jobs
+were scoring low/flagged "disqualified" — found by the user reviewing
+real scoring output directly, not by any test — because the profile
+card never told the model that `identity.toml`'s own
+`willing_to_relocate=true` means a same-country relocation requirement
+isn't a disqualifier; fixed, verified via real before/after rescoring
+(7 of 8 affected jobs improved, one 0→85).
+**A related, larger feature was explicitly scoped out, not built,** and
+saved to memory for later: the user separately wants the *rendered
+resume's own contact line* to dynamically show "Relocating to X" per
+job, not just the relevance-scoring prompt's internal reasoning. That's
+a different, bigger change (touches `resume/render.py`, needs its own
+per-job-variant design, unrelated to C4's fix) — confirmed with the user
+this is future work, not part of this session.
+50 new tests, written before implementation per hard rule 7
+(`test_relevance.py` 31, `test_eval_relevance.py` 13, `test_db.py`/
+`test_filter.py` additions). `uv run pytest` 432/432 (up from 379 at
+session start), `ruff check`/`format --check` clean.
 Next: no next task chosen yet, needs your go-ahead per the session
-protocol. Open candidates per TODO.md, none started: A4c (watermarking,
-still no urgency, no speculative bullets exist), B1-followup/
-B3-followup (deliberately deferred), C4 (relevance pre-filter), F2
-(metrics dashboard), F3 (Telegram notifier). P4 (accept and log to
-gap_ledger) also remains deliberately unbuilt. Fixing the Task Scheduler
-regression (stored-password logon mode) is a real open item but needs
-you at the Windows machine, not something a session here can do.
+protocol. Open candidates per TODO.md, none started: A4c (watermarking),
+B1-followup/B3-followup (deliberately deferred), F2 (metrics dashboard),
+F3 (Telegram notifier). P4 (accept and log to gap_ledger) also remains
+deliberately unbuilt.
 
-Separately: **B2's scheduling has regressed since the last checkpoint,
-confirmed this session via a real-db read-only check.** The Task
-Scheduler entry that was confirmed firing unattended on 2026-08-03 (see
-Known Issues) stopped succeeding sometime after `2026-08-03T20:00` and
-has failed silently through at least 2026-08-07: zero `runs` rows since
-then, zero log files for those dates, `Last Result -2147020576`
-(`0x800710E0`, low word `0x10E0` = "The operator or administrator has
-refused the request"). Root cause identified, not just observed: the
-task's "Interactive only" logon mode requires an active session at each
-3-hour trigger, so "run as soon as possible after a missed start" can't
-help, this is an attempted-and-rejected run, not a skipped one. Fix
-identified ("Run whether user is logged on or not" with a stored
-account password) but not yet applied — password setup hit an unrelated
-Windows issue. `sync.sh`/the task itself are confirmed still healthy: a
-manual `schtasks /run` still works. Full detail recorded in Known
-Issues below; the existing "RESOLVED 2026-08-03" text is still accurate
-for what it verified at the time, this is a new regression after it,
-not a correction to it. `jobs`/`companies`/`runs` counts (3882/15/12)
-are otherwise unchanged since the last checkpoint — this session's only
-real writes were F1's own (see above).
+Separately: **B2's Task Scheduler regression (documented last
+checkpoint as unresolved, silent failures since 2026-08-03T20:00) has
+at least partially recovered — one real unattended-shaped sync fired
+during this session**, `runs` id 16, `2026-08-11T11:00:03Z`
+(`new=386 updated=3443 edited=324 closed=383`), the first `runs` row of
+any kind since id 12 on 08-03. `jobs` grew 3882 → 4268 as a direct
+result. Not confirmed as fully resolved from one data point alone (the
+original confirmation pattern used two independent firings, see D-entry
+history) — flagged as a positive sign, not re-closed as fixed; the
+stored-password logon-mode fix's actual application status is still
+unknown to this session (Windows-side, can't verify from here). Revisit
+"is this genuinely fixed" once a second independent unattended firing is
+observed. `companies` unchanged at 15.
 
 **Read this before touching `data/jobengine.db`:** hard rule 13 in
 CLAUDE.md (added 2026-08-02, see D22 in docs/decisions.md) requires asking
@@ -131,14 +98,14 @@ project's own B1/B2 sessions) treated that file.
 | A4b | PDF conversion (LibreOffice headless) | done | `resume/pdf.py`, verified live against real `soffice` on 2 distinct real full-bank renders; found+fixed a real bullet-spacing bug along the way |
 | A4c | Watermarking (speculative preview) | not started | no urgency, no speculative bullets exist yet |
 | B1 | ATS clients + registry | done | clients+registry only, sync.py's fetch/diff loop is B2 |
-| B2 | Fetch and diff | done | scheduled and confirmed firing unattended on 2026-08-03; scheduling then regressed (silent failures 08-04 through at least 08-07, "Interactive only" logon mode), fix identified not yet applied; see Known Issues |
+| B2 | Fetch and diff | done | scheduled, confirmed firing 2026-08-03, regressed 08-04 through 08-07 (silent failures), one real sync fired again 08-11 (`runs` id 16) — partial recovery, not yet re-confirmed as fully fixed; see Known Issues |
 | B1-followup | Sponsorship-aware company vetting (DOL LCA) | not started | flagged only, not scoped, see TODO.md |
 | B3 | Filters + routing | done | signed off 2026-08-03; `filter.py` implemented, 40/40 tests pass, final numbers 859/3836 survivors (68/776/81 per profile) |
 | B3-followup | Calibrate daily filter-survivor cap | not started | deliberately deferred, see D23 in docs/decisions.md |
 | C1 | LLM router | done | `llm.check` verified live against real Ollama, all 3 stages reachable, exit 0; cold-start ~15s / steady-state 600-935ms, see Known Issues |
 | C2 | Eval fixtures | done | 50/50 JDs labelled, loaded into `human_labels` (150 rows); 11/15 keyword-annotated, short of TODO.md's literal target, done anyway per explicit sign-off, see Known Issues |
 | C3 | Keyword extraction | done | shipped per D27 (ship decision), not literal DoD: precision 0.83-0.86 passes, recall 0.35-0.47 fails the 0.85 gate (range across 4 live runs), see Known Issues |
-| C4 | Relevance filter | not started | |
+| C4 | Relevance filter | done | real production run: 921 rows/854 jobs; Task 1 eval fails (rho 0.23-0.35), `calibrate` passes (100%); shipped per D36, mirrors C3/D27 |
 | D1 | Rubric rules | done | all 13 hard rules + weighted score, `rubric/{measure,rules,score}.py` + CLI, grounded against 3 real JDs |
 | D2 | PDF geometry | done | absorbed into D1 (R002/R006 have no fallback); includes spec 08's per-file-hash cache (added after the user caught it missing at checkpoint review), 1 `pdfplumber.open` call per `score_resume()` run now, not 15+; see D28 addendum 4 |
 | D3 | Patch P0-P2 | done | `rubric/patch.py` + CLI; real deficit closed (Chroma DB / R002) via P2; P1 confirmed structurally inert against current bank, see D29 |
@@ -185,11 +152,14 @@ models + `insert_job_resume_variant()`, `get_job_resume_variant()`,
 `update_review_status()`, `insert_rubric_results()`/
 `get_rubric_results()`, `get_job_by_id()`, `latest_base_resume()` (full
 row, not just the version int), `insert_application()`,
-`list_pending_review_queue()`, `list_existing_variant_pairs()`),
+`list_pending_review_queue()`, `list_existing_variant_pairs()`; new this
+session, C4: `RelevanceScore`/`RankableScore` models +
+`upsert_relevance_score()`, `get_relevance_score()`,
+`list_relevance_scores_for_cutoff()` (joins `jobs` for the
+`first_seen_at` tiebreak), `update_relevance_selection()`),
 `__main__.py` (`uv run python -m jobengine.db {init,migrate,stats}`).
-Tests: `test_db.py` 42 (up from 30, +12 this session), `test_db_migrate.py`
-9 (new this session, simulates the pre-migration table shape via raw
-SQL and proves rows survive the rebuild).
+Tests: `test_db.py` 51 (up from 42, +9 this session), `test_db_migrate.py`
+9.
 
 **resume/** (`src/jobengine/resume/`): `bank.py` (pydantic bank schema,
 `load_bank()`, `validate_bank()`, `coverage_gaps()`, `keyword_counts()`,
@@ -264,16 +234,29 @@ Tests: `test_sources.py` 20, `test_sync.py` 10.
 (`load_filter_config()`, `matches_profiles()`, `is_remote()`,
 `is_excluded_employment_type()`, `is_already_applied()`,
 `is_citizenship_or_clearance_required()`, `is_above_target_seniority()`,
-`is_us_location()`/`classify_location()`; pure functions, nothing
-persisted; new this session, F1: `passes_all_filters(conn, job, config)
--> bool`, the full chain in one call, first real caller is
-`web/app.py`'s queue listing). `config/filters.yaml`: all 5
-hard/per-profile checks configured, `daily_cap: null` (deliberate, see
-D23). `extract.py` (`ExtractionSchema`, `is_good_quality_jd()`,
-`extract_keywords()` (the only LLM call site, via
-`router.get_provider("extract", ...)`), `analyze_job()` (production
-orchestrator, fans out to `job_analysis`/`keyword_corpus`)). Tests:
-`test_filter.py` 47 (up from 40, +7 this session), `test_extract.py` 14.
+`is_us_location()`/`classify_location()`, `passes_all_filters()` (the
+full B3 chain in one call), `phrase_matches()` (promoted public this
+session, C4, for reuse by `relevance.py`'s disqualifier-blocklist
+matching); pure functions, nothing persisted). `config/filters.yaml`:
+all 5 hard/per-profile checks configured, `daily_cap: null` (deliberate,
+see D23; still zero real consumers as of this session — `relevance.py`
+reads it, but it's still `null`). `extract.py` (`ExtractionSchema`,
+`is_good_quality_jd()`, `extract_keywords()`, `analyze_job()`). New this
+session, C4: `relevance.py` — `RelevanceSchema`, `RelevanceConfig` +
+`load_relevance_config()`, `ProfileCard`/`build_profile_card()`/
+`render_profile_card()` (target titles from `filters.yaml`, top keywords
+via `profiles/brief.py`'s promoted `top_corpus_keywords()`, seniority
+band derived from `filters.yaml`'s exclusion list, location rules
+derived from `identity.toml`'s real `preferences.willing_to_relocate`,
+read-only), `score_relevance()` (the one LLM call, via
+`router.get_provider("relevance", ...)`, timeout-wrapped), `score_job()`
+(per-job orchestrator, gated on `passes_all_filters()` first, one LLM
+call per matched profile), `select_top_n()`/`apply_relevance_cutoff()`
+(the `daily_cap: null` → select-everything design call), CLI
+(`score`/`calibrate` subcommands, `JOBENGINE_DB_PATH` override matching
+`web/app.py`'s pattern). `config/relevance.yaml` (new:
+`disqualifier_blocklist`, `freshness_window_days: null`). Tests:
+`test_filter.py` 47, `test_extract.py` 14, `test_relevance.py` 31 (new).
 
 **llm/** (`src/jobengine/llm/`): `schemas.py`, `providers/local.py`
 (`LocalProvider`, `think=False` pinned on every call), `providers/
@@ -284,11 +267,23 @@ jobengine.llm.check`). `config/llm.toml`. Tests: `test_llm_local_
 provider.py` 4, `test_llm_router.py` 11, `test_llm_check.py` 6.
 
 **eval/** (`src/jobengine/eval/`): `fixtures.py` (`load_human_labels()`),
-`harness.py`/`report.py`/`tasks/keyword_extraction.py` (spec 07 Task 2
-only, Task 1/C4 not wired in), `__main__.py` (CLI: `uv run python -m
-jobengine.eval {run,compare}`). `tests/fixtures/eval/human_labels.yaml`:
-50 real JDs, 11 with hand-extracted keywords. Tests: `test_eval_
-fixtures.py` 6, `test_eval_keyword_extraction.py` 11.
+`harness.py` (`run_all()` now runs both Task 1 and Task 2, gained
+`filter_config`/`relevance_config`/`bank` params for Task 1), `report.py`
+(gained `task1_passed()`, `print_task1_report()`,
+`write_task1_model_evals()` — `model_evals` has no `profile` column, so
+profile is encoded into the metric name, e.g.
+`spearman_rho_ai_ml_engineer`), `tasks/keyword_extraction.py` (Task 2),
+`tasks/relevance.py` (new this session, C4, Task 1: `_spearman_rho()`
+hand-rolled rank correlation, `_top_k_overlap()`, calls
+`score_relevance()` directly per labeled `(job, profile)` row, same
+"call the real production function directly" pattern Task 2 already
+established), `__main__.py` (CLI: `uv run python -m jobengine.eval
+{run,compare}`, `run` now also loads `filter_config`/`relevance_config`/
+`bank`). `tests/fixtures/eval/human_labels.yaml`: 50 real JDs (all 50
+labeled for relevance across all 3 profiles — 150 real data points, not
+15; 11 with hand-extracted keywords, a separate and smaller subset).
+Tests: `test_eval_fixtures.py` 6, `test_eval_keyword_extraction.py` 11,
+`test_eval_relevance.py` 13 (new).
 
 **profiles/** (`src/jobengine/profiles/`, new this session, E1):
 `config.py` (`ProfileConfig` pydantic model, `load_profile_config()`
@@ -390,35 +385,85 @@ lazily-rendered candidates, `{job_id}/{profile}/candidate_{tiers}.
 `3871/software_engineer/candidate_P0_P1_P2_P3.{docx,pdf}` (this
 session's real worked-example verification, see below).
 
-**Full suite: 379/379 passing (up from 328 at session start, 370 after
-F1's initial build, +9 for `passes_all_filters`), `ruff check src/`
-clean, `ruff format --check src/` clean** (3 pre-existing `RUF059`
-warnings in `test_render.py`, confirmed via `git stash` to predate an
-earlier session, untouched, unaffected by this session).
+**Full suite: 432/432 passing (up from 379 at session start), `ruff
+check src/` clean, `ruff format --check src/` clean** (3 pre-existing
+`RUF059` warnings in `test_render.py`, confirmed via `git stash` to
+predate an earlier session, untouched, unaffected by this session).
 
-**`data/jobengine.db` real accumulated state, verified this checkpoint:**
-15 companies, 3882 jobs, 12 `runs` rows, 150 `human_labels` rows, 30
-`model_evals` rows, 4 `base_resumes` rows (unchanged this session).
-**F1 wrote 4 genuinely new kinds of real rows to this db for the first
-time ever, all from the single real worked-example verification (job
-3871), not synthetic data:** `job_analysis` 0 -> 1, `keyword_corpus` 0
--> 7, `job_resume_variants` 0 -> 1, `rubric_results` 0 -> 1. Every one
-confirmed deliberate (asked before the migration that added the
-columns/index these rows needed, then asked again implicitly satisfied
-by running the documented verification step). `applications` and
-`gap_ledger` both still 0 rows: the worked example was rejected, not
-approved (a genuine, correct outcome given `hard_failures: ['R001']`,
-not a shortcut to avoid exercising the approve path — the automated
-test suite's `test_approve_flips_review_status_and_creates_application`
-covers that path against a scratch db instead), and P4 (gap ledger
-writeback) still isn't built. `jobs`/`companies`/`runs` unchanged since
-the prior checkpoint (no sync activity happened this session); every
-other table's read-only status was reconfirmed before this session's
-real writes, not assumed.
+**`data/jobengine.db` real accumulated state, verified this
+checkpoint:** 15 companies, 4268 jobs (up from 3882 — one real sync
+fired this session, `runs` id 16, see the header above), 16 `runs` rows
+(12 + 3 relevance-stage runs from this session + 1 real sync), 150
+`human_labels` rows, 40 `model_evals` rows (up from 30: 6 Task 1 rows,
+1 `relevance_calibration` row, 3 Task 2 rerun rows), 4 `base_resumes`
+rows (unchanged), `job_analysis`/`keyword_corpus`/`job_resume_variants`/
+`rubric_results` unchanged at 1/7/1/1 (F1's own first-ever rows, not
+touched this session), `applications`/`gap_ledger` still 0.
+**C4 wrote `relevance_scores` for the first time ever this project has
+had real data there: 0 -> 921 rows, 854 distinct real jobs**, all from
+real production runs (two bounded `--limit 100` runs around the
+location-prompt fix, then one full unbounded run covering the entire
+real backlog), not synthetic data. Confirmed deliberate at every stage:
+asked before the first bounded run, asked again before the unbounded
+one, user explicitly said "proceed" for each. `daily_cap` is still
+`null`, so all 921 scored rows are `selected=1` — no cutoff has ever
+been applied for real yet.
 
 ---
 
 ## Known issues and deferred work
+
+- **C4's Task 1 numeric eval genuinely fails; `calibrate`'s real
+  qualitative check genuinely passes — both true at once, unresolved,
+  not something this session tried to explain away.** Real numbers:
+  Task 1 rho 0.23-0.35 / top-30 overlap 0.63-0.70 per profile (need
+  >= 0.70 / >= 0.75) vs. `calibrate`'s real 20/20 = 100% agreement.
+  Possible explanations, neither investigated yet: C2's original
+  hand-labels (one hour, months before this session, under different
+  context/mood/criteria) may be a noisier ground truth than the user's
+  in-the-moment calibration judgment; or n=50/profile is genuinely too
+  small for a stable rho given real score variance (a few label
+  swaps at the margin move rho a lot at this sample size). Revisit if a
+  second calibration round (a different 20-job sample, or a larger
+  fixture) shows the same gap — that would point at the fixture, not
+  noise. See D36 in docs/decisions.md for the full numbers.
+- `config/relevance.yaml`'s `disqualifier_blocklist` is a short starter
+  list (citizenship, security clearance, export control, itar) grown
+  from spec 06's own examples, not yet tuned against real calibration
+  sessions. The real run surfaced other recurring disqualifier-shaped
+  phrases in the model's own output (seniority-level mismatches, skill
+  gaps) that are correctly NOT in this list (they're not spec 06's
+  "explicit hard blockers" category, they're just low-relevance
+  reasoning) — but revisit if a real citizenship/clearance phrasing
+  shows up in practice that the current 4 phrases miss.
+- **`daily_cap` and `freshness_window_days` are both still `null` after
+  a real 921-row production run** — every scored job is `selected=1`,
+  no cutoff has ever actually trimmed anything for real. This is
+  intentional (same D23 reasoning both fields already carried before
+  C4), not a bug, but worth knowing: the "top N" half of spec 06's own
+  design has never been exercised against real data, only the scoring
+  half. Revisit once B3-followup's own deferred cap-calibration work
+  happens.
+- A real, minor B3 gap surfaced while diagnosing C4's filter results,
+  not part of this session's fix: `config/filters.yaml`'s
+  `location.us_major_city_names` doesn't include "Los Angeles" (only
+  san francisco/bay area/seattle/chicago), so a real job located in "Los
+  Angeles" (job_id 18 in this session's own diagnostic) reads as
+  `ambiguous_unparseable` rather than a confirmed US match, and
+  currently also fails the title-match check independently so it never
+  mattered for that specific job. Flagging since it's a real, if small,
+  gap in an already-shipped B3 list; grow the list by hand if this
+  recurs for a job whose title otherwise would have mattered.
+- **Two real bugs from this session, already fixed, not still open —
+  recorded here only because a future session reading `git log` alone
+  might miss why `score_job()`'s gating and `_seed_job()`'s test
+  defaults look the way they do:** `score_job()` used to gate only on
+  `matches_profiles()` (title), not the full B3 chain, which would have
+  wasted ~195 real LLM calls on the first unbounded run; and several
+  real relocation-requiring US jobs were scoring low purely because the
+  profile card never surfaced `identity.toml`'s real
+  `willing_to_relocate=true`. Both fixed, both verified with real
+  before/after numbers. Full detail: D36, docs/decisions.md.
 
 - **RESOLVED 2026-08-07, not left open:** F1's `GET /` "not yet
   reviewed" section used to only reapply B3's title check
@@ -848,6 +893,15 @@ real writes, not assumed.
   this gap must be excluded or explicitly noted, not averaged over as if
   it were a genuine zero-volume day — doing so would understate real
   daily volume.
+  **UPDATE 2026-08-11, partial recovery, not re-closed:** one real sync
+  fired, `runs` id 16, `2026-08-11T11:00:03Z`, real non-zero diffs
+  (`new=386 updated=3443 edited=324 closed=383`) — the first `runs` row
+  of any kind since id 12 (08-03). This is one data point, not the same
+  two-independent-firings bar that originally confirmed the schedule
+  working; it's flagged as encouraging, not verified-fixed. Whether the
+  stored-password fix was actually applied on the Windows side is
+  unknown to this session (can't check from here). Revisit once a
+  second independent firing lands.
 - `sync.py`'s CLI (`_main()`) calls `logging.basicConfig(level=logging.INFO)`
   globally, which also turns on `httpx`'s own INFO-level request logging,
   every GET request prints a line. Harmless (stderr noise, not a
@@ -1346,6 +1400,96 @@ real writes, not assumed.
 ## Session log
 
 (Newest first. Date, task id, what changed, what to do next.)
+
+- 2026-08-07 through 2026-08-11, C4 (done): Planned in Claude Code plan
+  mode per explicit request, grounded before any code. Attempted the
+  requested live-grounding run first: a real call with a loosely-typed
+  ad hoc schema hung 13+ minutes; killed it, asked the user how to
+  proceed (via `AskUserQuestion`), scaled down to an 8-job real probe
+  (rho ~0.45, explicitly caveated as small-n, not the real measurement)
+  per their choice. Delegated the file-by-file plan to a Plan sub-agent
+  with full research context, reviewed its output against the real
+  schema before accepting it (confirmed `relevance_scores` already
+  existed from A1; `daily_cap` already loaded with zero consumers).
+  Built `pipeline/relevance.py`, `db/models.py`'s `RelevanceScore` + 5
+  helpers, `config/relevance.yaml`, `eval/tasks/relevance.py` (Task 1)
+  wired into the existing harness, tests-first throughout (50 new
+  tests). Full mocked suite 432/432, ruff clean, confirmed before any
+  real Ollama/db activity.
+  Root-caused the earlier hang for real, not left as an unresolved risk:
+  re-ran the same escalating sizes against the real shipped
+  `RelevanceSchema` (properly `Literal`/`Field`-constrained) — zero
+  hangs at any size up to spec 06's full 6k-char/30-keyword shape,
+  5-16s per call. Added an `asyncio.wait_for` timeout to
+  `score_relevance()` anyway, defense in depth for an unattended
+  ~900-call batch regardless of the (likely) root cause.
+  Ran the real Task 1 eval (`uv run python -m jobengine.eval run`)
+  against the full 50-job/150-point fixture: FAILED (rho 0.23-0.35,
+  overlap 0.63-0.70 per profile, worse than the small-n planning
+  probe suggested — a real, not-optimistic finding). 6 new `model_evals`
+  rows written for real.
+  Validated the `score` CLI against a scratch db copy first (hard rule
+  13), found and fixed a real gap before the expensive real run: the
+  CLI had no db-path override at all (added `JOBENGINE_DB_PATH`,
+  matching `web/app.py`'s existing pattern). Ran a real bounded
+  (`--limit 100`) production score against the real db after explicit
+  confirmation: 39 real rows, output looked sensible on inspection.
+  User then reviewed that real output directly and caught a real
+  problem: relocation-requiring US jobs (e.g. "must relocate to SF Bay
+  Area") were scoring low/flagged as disqualified, despite
+  `identity.toml`'s real `willing_to_relocate=true`. Diagnosed
+  correctly on the first pass (not guessed): confirmed via a live
+  breakdown of the 62 non-scored jobs from that same 100-job batch that
+  zero were excluded by B3's own location check (the issue was entirely
+  in the relevance-scoring prompt, not the deterministic filter). Fixed
+  `build_profile_card()` to read `identity.toml`'s real
+  `willing_to_relocate` (read-only) and tell the model relocating
+  anywhere in the US is acceptable; tests-first (2 new tests). Verified
+  via real before/after rescoring on the same 100-job batch: 7 of 8
+  relocation-flagged jobs improved substantially (one 0->85), one
+  stayed low for an independently legitimate skill-mismatch reason
+  (confirmed by reading its own `one_line` reasoning, not assumed).
+  Explicitly distinguished the user's related-but-separate ask (the
+  *rendered resume's* contact line dynamically showing "Relocating to
+  X" per job) as a different, larger, unscoped feature — confirmed out
+  of scope for C4, saved as a new memory
+  (`feature-resume-header-relocation`) rather than built or lost.
+  Also found and fixed a second real gap before the expensive run, via
+  direct real-number quantification rather than discovering it mid-run:
+  `score_job()` gated only on title match, not the full B3 chain — a
+  live count (1049 title-matches vs. 854 full-chain survivors) showed
+  an unbounded run would have wasted ~195 real calls. Fixed to gate on
+  `passes_all_filters()` first; required updating `_seed_job()`'s test
+  default location too, since every existing `score_job()` test had
+  been implicitly relying on the (buggy) title-only gate.
+  Ran the real unbounded production backlog after explicit confirmation:
+  **921 real `relevance_scores` rows across 854 distinct real jobs**,
+  1h46m wall clock, zero hangs, a real `runs` row recorded. Kept the
+  user informed of live progress via direct read-only db queries
+  (`relevance_scores` row/distinct-job counts) without touching the
+  running process, and gave a rate-based ETA from observed throughput
+  when asked.
+  User then ran `calibrate --profile software_engineer` themselves
+  (interactive, needs real human input, correctly declined to run it
+  via tool automation) against the real scored data: 20/20 = 100% real
+  agreement, clearing spec 06's 70% bar. Clarified for the user, when
+  asked, that agree/disagree calibration verdicts are a pure quality
+  check on the scoring model, unrelated to F1's separate approve/reject
+  review-queue actions.
+  Closed C4 on the same precedent C3/D27 already set: the literal Task 1
+  numeric gate fails for real, but spec 06's own DoD (full production
+  run + `calibrate` >= 70%) passes for real, and both numbers are
+  recorded honestly rather than only the passing one — see D36 in
+  docs/decisions.md for the complete writeup, including the still-open,
+  unexplained tension between the two.
+  Also noted, incidentally, via a real-db read-only check during this
+  session: B2's Task Scheduler regression (documented last checkpoint)
+  shows one real sync firing again on 08-11 (`runs` id 16,
+  `jobs` 3882->4268) — partial recovery, not re-confirmed as fixed from
+  one data point alone.
+  Full suite 432/432 (up from 379 at session start), ruff clean.
+  Next: no next task chosen yet, needs explicit go-ahead per the session
+  protocol.
 
 - 2026-08-07, F1 follow-up (done, same session as F1's initial build):
   Two unrelated items handled back to back.

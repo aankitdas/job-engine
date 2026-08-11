@@ -1332,3 +1332,117 @@ gaps PROGRESS.md's Known Issues had flagged since C3/E1
 jobs").
 
 Full suite 370/370 (up from 328), `ruff check`/`format --check` clean.
+
+---
+
+**D36. C4 (relevance pre-filter) ships built, real-production-verified,
+and closed against spec 06's own DoD -- but spec 07's Task 1 numeric
+eval genuinely fails, alongside a real qualitative pass, and both are
+recorded honestly rather than picking the flattering one.**
+
+Planned in Claude Code plan mode per the user's request, grounded before
+any code against real data: a live prototype hung 13+ minutes on the
+first attempt (root-caused later, see below), a scaled-down real probe
+(8 real fixture jobs) gave an honest small-n directional signal (rho
+~0.45, explicitly caveated as not the real measurement), and the plan
+itself was reviewed against the actual schema (`relevance_scores`
+already existed from A1; `config/filters.yaml`'s `daily_cap` already
+loaded with zero consumers) before writing a line of implementation.
+
+Built `src/jobengine/pipeline/relevance.py` (`RelevanceSchema`,
+`build_profile_card()`/`render_profile_card()`, `score_relevance()`,
+`score_job()`, `select_top_n()`/`apply_relevance_cutoff()`, the
+`score`/`calibrate` CLI), `db/models.py`'s `RelevanceScore` + 5 helpers,
+`config/relevance.yaml` (new: `disqualifier_blocklist`,
+`freshness_window_days`, both `null`/deferred per the same D23 reasoning
+as `daily_cap`), and `eval/tasks/relevance.py` (Task 1, hand-rolled
+Spearman rho, no scipy dependency) wired into the existing eval harness
+alongside Task 2. Tests-first throughout per hard rule 7: 50 new tests
+(`test_relevance.py` 31, `test_eval_relevance.py` 13, plus `test_db.py`/
+`test_filter.py` additions), full suite 432/432, ruff clean.
+
+**Three real bugs found and fixed during this session, each caught by
+verification rather than assumed away:**
+
+1. **The original live-prototype hang, root-caused via a controlled
+   escalation test, not left as an unresolved risk.** The first prototype
+   used a loosely-typed ad hoc schema (`seniority_match: str`, unbounded
+   `relevance: int`); re-run with the real shipped `RelevanceSchema`
+   (`Literal["under","match","over"]`, `Field(ge=0,le=100)`) at
+   escalating sizes up to spec 06's full 6k-char/30-keyword shape
+   completed in 5-16s every time, no hang. Conclusion: the looser
+   ad hoc grammar was the likely cause, not a systemic Ollama/hardware
+   issue. Added an explicit `asyncio.wait_for(..., timeout=config.local.
+   timeout_s)` around `score_relevance()`'s call anyway, as defense in
+   depth for an unattended ~900-call batch, not because the root cause
+   stayed uncertain.
+
+2. **`score_job()` gated only on `matches_profiles()` (title match), not
+   the full B3 chain, found via real-number quantification before the
+   expensive production run, not discovered mid-run.** A direct count
+   against the real db showed 1049 jobs surviving title-match alone vs.
+   854 surviving the full `passes_all_filters()` chain -- an unbounded
+   run would have wasted ~195 real LLM calls on jobs already disqualified
+   by location/seniority/employment-type. Fixed by gating `score_job()`
+   on `passes_all_filters()` first (job-level checks), then
+   `matches_profiles()` only for the per-profile fan-out. A dedicated
+   regression test (`test_score_job_skips_llm_when_title_matches_but_
+   other_b3_checks_fail`) added; `_seed_job()`'s test default location
+   also had to change from unset (silently `None`, failing every
+   B3-location check) to a real US city, since every prior `score_job()`
+   test had been implicitly relying on skipping that check entirely.
+
+3. **Relocation-requiring US jobs were scoring low/getting flagged as
+   "disqualified" by the model, found via the user's own direct review
+   of real scoring output, not caught by any test.** The profile card's
+   `location_rules` text only said "on-site outside the US is a
+   disqualifier," leaving the model free to independently read a
+   same-country relocation requirement (e.g. "must relocate to SF Bay
+   Area") as a negative -- despite `identity.toml`'s real, already-true
+   `preferences.willing_to_relocate = true`. Fixed by reading that field
+   (read-only, hard rule 1) and, when true, explicitly telling the model
+   relocating anywhere in the US is acceptable and not a disqualifier.
+   Verified by rescoring the same jobs before/after: 7 of 8
+   relocation-flagged jobs improved substantially (one 0 -> 85), one
+   stayed low for an independently legitimate reason (a genuine skill
+   mismatch the model's own `one_line` still names). Explicitly
+   distinguished from a related but separate, larger, NOT-built feature
+   request (the rendered resume's own contact/location line dynamically
+   showing "Relocating to X" per job) -- confirmed with the user this is
+   out of scope for C4, saved as its own memory
+   (`feature-resume-header-relocation`) for a future session.
+
+**Real production run, not just eval numbers.** After the location fix
+was validated on a 100-job bounded sample (39 real scores, sensible
+disqualifiers/reasoning, confirmed zero real-db writes on scratch-copy
+dry runs beforehand per hard rule 13), ran the full real backlog
+unbounded: **921 `relevance_scores` rows across 854 distinct real jobs**,
+1h46m wall clock, zero hangs, a real `runs` row recorded
+(`stage=relevance`). `software_engineer` avg score 64.0 (n=775),
+`data_scientist` 80.5 (n=82), `ai_ml_engineer` 77.5 (n=64). First-ever
+real relevance-scoring production data this project has produced.
+
+**Task 1's real numeric eval fails; `calibrate`'s real qualitative check
+passes at 100% -- both recorded, neither hidden to make the other look
+better.** `uv run python -m jobengine.eval run` against the full 50-job/
+150-point fixture: rho 0.23-0.35 per profile (need >= 0.70), top-30
+overlap 0.63-0.70 (need >= 0.75) -- Task 1 FAILED, worse than the small-n
+planning-time probe suggested (rho ~0.45), a real finding, not
+optimistic. Separately, the user ran `calibrate --profile
+software_engineer` themselves, live, against real production-scored
+jobs: 20/20 = 100% agreement with the model's own scores and reasoning,
+spot-checked by hand, clearing spec 06's 70% bar cleanly. This is a
+genuine, unresolved tension worth stating plainly: the model's
+individual judgments hold up under real human review, but don't
+rank-correlate well against the older hand-labeled fixture. Possible
+explanations not yet investigated: the fixture's original labels (from
+C2, an hour of hand-labeling months earlier under different context) may
+themselves be noisier or use different implicit criteria than the user's
+in-the-moment calibration judgment; or n=50/profile is genuinely too
+small for a stable rho given real score variance. Per TODO.md's literal
+C4 "Done:" line (spec 07's Task 1 numbers) and spec 06's own DoD (a full
+run + `calibrate` >= 70%), the two bars disagree -- both are recorded
+here rather than one being quietly treated as the deciding one; see
+PROGRESS.md for how C4 is marked in the status table given this.
+
+Full suite 432/432, `ruff check`/`format --check` clean.

@@ -1,0 +1,26 @@
+# C4 relevance-scoring config. See specs/06-relevance-filter.md.
+#
+# disqualifier_blocklist matches against the MODEL's own free-text
+# `disqualifiers` output (RelevanceSchema.disqualifiers), not JD text
+# directly -- a different matching problem from config/filters.yaml's
+# citizenship_clearance.exclude_phrases, which matches JD text for B3's
+# deterministic filter. Same phrase-matching mechanism (word-boundary for
+# single words, substring for multi-word phrases; see filter.py's
+# phrase_matches), different input. Anything in a job's disqualifiers
+# list matching one of these phrases forces relevance to 0 regardless of
+# the model's own number (spec 06: "code decides").
+disqualifier_blocklist:
+  - "citizenship"
+  - "security clearance"
+  - "export control"
+  - "itar"
+  # years-of-experience floors above target seniority band and other
+  # real disqualifiers surface via calibrate sessions; grow by hand.
+
+# Deferred, not tuned -- see D23 in docs/decisions.md and daily_cap's own
+# comment in config/filters.yaml for the identical reasoning: B2 has only
+# ever run as a single-snapshot backlog, no real day-over-day sync
+# history exists yet to calibrate a real freshness window against. null
+# means every open (closed_at IS NULL) job is in scope, no window
+# applied yet.
+freshness_window_days: null

@@ -48,7 +48,7 @@ class TopKeywords(NamedTuple):
     source: Literal["corpus", "bank_frequency"]
 
 
-def _top_corpus_keywords(
+def top_corpus_keywords(
     conn: sqlite3.Connection, bank: Bank, profile: str, limit: int = 30
 ) -> TopKeywords:
     rows = conn.execute(
@@ -125,7 +125,7 @@ def generate_brief(
     identity: Identity,
     out_dir: Path,
 ) -> str:
-    top = _top_corpus_keywords(conn, bank, profile, limit=30)
+    top = top_corpus_keywords(conn, bank, profile, limit=30)
     gap = _gap_ledger_top(conn, profile, limit=10)
     top_keyword_names = [kw for kw, _ in top.keywords]
     measurements = _current_measurements(

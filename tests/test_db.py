@@ -10,12 +10,14 @@ from jobengine.db.models import (
     Job,
     JobResumeVariant,
     Outcome,
+    RelevanceScore,
     RubricResultRow,
     find_job_resume_variant_by_hash,
     get_company,
     get_job,
     get_job_by_id,
     get_job_resume_variant,
+    get_relevance_score,
     get_rubric_results,
     insert_application,
     insert_base_resume,
@@ -26,9 +28,12 @@ from jobengine.db.models import (
     latest_base_resume_version,
     list_existing_variant_pairs,
     list_pending_review_queue,
+    list_relevance_scores_for_cutoff,
+    update_relevance_selection,
     update_review_status,
     upsert_company,
     upsert_job,
+    upsert_relevance_score,
 )
 
 
@@ -600,3 +605,129 @@ def test_list_existing_variant_pairs_includes_pending_and_reviewed(
 
 def test_list_existing_variant_pairs_empty_when_no_variants(conn):
     assert list_existing_variant_pairs(conn) == set()
+
+
+# ---------------------------------------------------------------------------
+# C4: relevance_scores
+# ---------------------------------------------------------------------------
+
+
+def _relevance_score(job_id, profile="ai_ml_engineer", **overrides):
+    fields = {
+        "job_id": job_id,
+        "profile": profile,
+        "score": 75.0,
+        "seniority_match": "match",
+        "keyword_hits": '["Python", "LLM"]',
+        "disqualifiers": "[]",
+        "one_line": "Strong fit.",
+        "selected": 0,
+        "model": "qwen3.5:9b-q4_K_M",
+        "scored_at": "2026-08-07T00:00:00+00:00",
+    }
+    fields.update(overrides)
+    return RelevanceScore(**fields)
+
+
+def test_upsert_relevance_score_inserts_a_row(conn_with_company):
+    conn = conn_with_company
+    job_id = upsert_job(conn, _job())
+    upsert_relevance_score(conn, _relevance_score(job_id))
+    row = conn.execute(
+        "SELECT score, seniority_match FROM relevance_scores "
+        "WHERE job_id = ? AND profile = ?",
+        (job_id, "ai_ml_engineer"),
+    ).fetchone()
+    assert row["score"] == 75.0
+    assert row["seniority_match"] == "match"
+
+
+def test_get_relevance_score_returns_none_when_absent(conn_with_company):
+    conn = conn_with_company
+    job_id = upsert_job(conn, _job())
+    assert get_relevance_score(conn, job_id, "ai_ml_engineer") is None
+
+
+def test_get_relevance_score_round_trips(conn_with_company):
+    conn = conn_with_company
+    job_id = upsert_job(conn, _job())
+    upsert_relevance_score(conn, _relevance_score(job_id, score=42.0))
+    result = get_relevance_score(conn, job_id, "ai_ml_engineer")
+    assert result is not None
+    assert result.job_id == job_id
+    assert result.score == 42.0
+    assert result.selected == 0
+
+
+def test_upsert_relevance_score_rerun_updates_in_place(conn_with_company):
+    conn = conn_with_company
+    job_id = upsert_job(conn, _job())
+    upsert_relevance_score(conn, _relevance_score(job_id, score=10.0))
+    upsert_relevance_score(conn, _relevance_score(job_id, score=90.0))
+    rows = conn.execute(
+        "SELECT COUNT(*) AS n FROM relevance_scores WHERE job_id = ?", (job_id,)
+    ).fetchone()
+    assert rows["n"] == 1
+    result = get_relevance_score(conn, job_id, "ai_ml_engineer")
+    assert result.score == 90.0
+
+
+def test_upsert_relevance_score_different_profiles_are_distinct_rows(
+    conn_with_company,
+):
+    conn = conn_with_company
+    job_id = upsert_job(conn, _job())
+    upsert_relevance_score(conn, _relevance_score(job_id, "ai_ml_engineer", score=10.0))
+    upsert_relevance_score(
+        conn, _relevance_score(job_id, "software_engineer", score=80.0)
+    )
+    rows = conn.execute(
+        "SELECT COUNT(*) AS n FROM relevance_scores WHERE job_id = ?", (job_id,)
+    ).fetchone()
+    assert rows["n"] == 2
+
+
+def test_list_relevance_scores_for_cutoff_includes_first_seen_at(conn_with_company):
+    conn = conn_with_company
+    job_id = upsert_job(conn, _job(first_seen_at="2026-08-01T00:00:00+00:00"))
+    upsert_relevance_score(conn, _relevance_score(job_id, score=55.0))
+    rows = list_relevance_scores_for_cutoff(conn, "ai_ml_engineer")
+    assert len(rows) == 1
+    assert rows[0].job_id == job_id
+    assert rows[0].score == 55.0
+    assert rows[0].first_seen_at == "2026-08-01T00:00:00+00:00"
+
+
+def test_list_relevance_scores_for_cutoff_scoped_to_profile(conn_with_company):
+    conn = conn_with_company
+    job_id = upsert_job(conn, _job())
+    upsert_relevance_score(conn, _relevance_score(job_id, "ai_ml_engineer"))
+    upsert_relevance_score(conn, _relevance_score(job_id, "data_scientist"))
+    rows = list_relevance_scores_for_cutoff(conn, "ai_ml_engineer")
+    assert len(rows) == 1
+    assert rows[0].job_id == job_id
+
+
+def test_update_relevance_selection_sets_selected_and_resets_others(
+    conn_with_company,
+):
+    conn = conn_with_company
+    job_a = upsert_job(conn, _job(ats_job_id="1"))
+    job_b = upsert_job(conn, _job(ats_job_id="2"))
+    upsert_relevance_score(conn, _relevance_score(job_a, selected=1))
+    upsert_relevance_score(conn, _relevance_score(job_b, selected=1))
+
+    update_relevance_selection(conn, "ai_ml_engineer", {job_a})
+
+    assert get_relevance_score(conn, job_a, "ai_ml_engineer").selected == 1
+    assert get_relevance_score(conn, job_b, "ai_ml_engineer").selected == 0
+
+
+def test_update_relevance_selection_empty_set_deselects_all(conn_with_company):
+    conn = conn_with_company
+    job_id = upsert_job(conn, _job())
+    upsert_relevance_score(conn, _relevance_score(job_id, selected=1))
+
+    update_relevance_selection(conn, "ai_ml_engineer", set())
+
+    assert get_relevance_score(conn, job_id, "ai_ml_engineer").selected == 0

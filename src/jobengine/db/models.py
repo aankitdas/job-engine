@@ -5,6 +5,7 @@ mirrors.
 """
 
 import sqlite3
+from typing import NamedTuple
 
 from pydantic import BaseModel
 
@@ -157,6 +158,25 @@ class QueueEntry(BaseModel):
     score: float | None = None
     passed: bool | None = None
     review_status: str
+
+
+class RelevanceScore(BaseModel):
+    job_id: int
+    profile: str
+    score: float
+    seniority_match: str | None = None
+    keyword_hits: str | None = None
+    disqualifiers: str | None = None
+    one_line: str | None = None
+    selected: int = 0
+    model: str | None = None
+    scored_at: str
+
+
+class RankableScore(NamedTuple):
+    job_id: int
+    score: float
+    first_seen_at: str
 
 
 def upsert_company(conn: sqlite3.Connection, company: Company) -> None:
@@ -584,3 +604,79 @@ def list_existing_variant_pairs(conn: sqlite3.Connection) -> set[tuple[int, str]
     reappear as "new" once it's been reviewed."""
     rows = conn.execute("SELECT job_id, profile FROM job_resume_variants").fetchall()
     return {(row["job_id"], row["profile"]) for row in rows}
+
+
+def upsert_relevance_score(conn: sqlite3.Connection, score: RelevanceScore) -> None:
+    """Insert or replace on (job_id, profile) conflict, matching
+    upsert_job_analysis's convention. No RETURNING id: relevance_scores'
+    primary key is the (job_id, profile) composite itself (schema.sql),
+    no surrogate id column, same shape as upsert_company's (slug, ats)
+    conflict target."""
+    conn.execute(
+        """
+        INSERT INTO relevance_scores (
+            job_id, profile, score, seniority_match, keyword_hits,
+            disqualifiers, one_line, selected, model, scored_at
+        ) VALUES (
+            :job_id, :profile, :score, :seniority_match, :keyword_hits,
+            :disqualifiers, :one_line, :selected, :model, :scored_at
+        )
+        ON CONFLICT (job_id, profile) DO UPDATE SET
+            score = excluded.score,
+            seniority_match = excluded.seniority_match,
+            keyword_hits = excluded.keyword_hits,
+            disqualifiers = excluded.disqualifiers,
+            one_line = excluded.one_line,
+            selected = excluded.selected,
+            model = excluded.model,
+            scored_at = excluded.scored_at
+        """,
+        score.model_dump(),
+    )
+
+
+def get_relevance_score(
+    conn: sqlite3.Connection, job_id: int, profile: str
+) -> RelevanceScore | None:
+    row = conn.execute(
+        "SELECT * FROM relevance_scores WHERE job_id = ? AND profile = ?",
+        (job_id, profile),
+    ).fetchone()
+    if row is None:
+        return None
+    return RelevanceScore(**dict(row))
+
+
+def list_relevance_scores_for_cutoff(
+    conn: sqlite3.Connection, profile: str
+) -> list[RankableScore]:
+    """Every scored row for a profile, joined to jobs for the
+    first_seen_at tiebreak select_top_n() needs (relevance_scores itself
+    has no first_seen_at column)."""
+    rows = conn.execute(
+        """
+        SELECT r.job_id AS job_id, r.score AS score, j.first_seen_at AS first_seen_at
+        FROM relevance_scores r JOIN jobs j ON j.id = r.job_id
+        WHERE r.profile = ?
+        """,
+        (profile,),
+    ).fetchall()
+    return [RankableScore(r["job_id"], r["score"], r["first_seen_at"]) for r in rows]
+
+
+def update_relevance_selection(
+    conn: sqlite3.Connection, profile: str, selected_job_ids: set[int]
+) -> None:
+    """Resets selected=0 for every row of this profile, then sets
+    selected=1 for exactly selected_job_ids. Idempotent and safe to
+    re-run after a daily_cap change or a rescoring: a job that was
+    selected before but isn't in this run's top-N is demoted, not left
+    stale."""
+    conn.execute(
+        "UPDATE relevance_scores SET selected = 0 WHERE profile = ?", (profile,)
+    )
+    if selected_job_ids:
+        conn.executemany(
+            "UPDATE relevance_scores SET selected = 1 WHERE job_id = ? AND profile = ?",
+            [(job_id, profile) for job_id in selected_job_ids],
+        )

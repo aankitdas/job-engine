@@ -8,6 +8,9 @@ import asyncio
 from jobengine.db.migrate import DEFAULT_DB_PATH, connect
 from jobengine.eval import harness
 from jobengine.llm.router import load_config
+from jobengine.pipeline.filter import load_filter_config
+from jobengine.pipeline.relevance import load_relevance_config
+from jobengine.resume.bank import DEFAULT_BANK_PATH, load_bank
 
 
 def _main() -> None:
@@ -24,7 +27,19 @@ def _main() -> None:
     try:
         if args.command == "run":
             llm_config = load_config()
-            asyncio.run(harness.run_all(conn, args.model, llm_config))
+            filter_config = load_filter_config()
+            relevance_config = load_relevance_config()
+            bank = load_bank(DEFAULT_BANK_PATH)
+            asyncio.run(
+                harness.run_all(
+                    conn,
+                    args.model,
+                    llm_config,
+                    filter_config,
+                    relevance_config,
+                    bank,
+                )
+            )
         elif args.command == "compare":
             _compare(conn)
     finally:

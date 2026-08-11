@@ -128,37 +128,37 @@ def _insert_gap_ledger_row(conn, profile, keyword, job_id):
 
 
 # ---------------------------------------------------------------------------
-# _top_corpus_keywords
+# top_corpus_keywords
 # ---------------------------------------------------------------------------
 
 
-def test_top_corpus_keywords_reads_real_rows_ordered_by_occurrences(conn):
-    from jobengine.profiles.brief import _top_corpus_keywords
+def testtop_corpus_keywords_reads_real_rows_ordered_by_occurrences(conn):
+    from jobengine.profiles.brief import top_corpus_keywords
 
     _insert_corpus_row(conn, "ai_ml_engineer", "PyTorch", 10)
     _insert_corpus_row(conn, "ai_ml_engineer", "XGBoost", 25)
     _insert_corpus_row(conn, "data_scientist", "SQL", 99)  # other profile
 
     bank = _bank([])
-    result = _top_corpus_keywords(conn, bank, "ai_ml_engineer", limit=30)
+    result = top_corpus_keywords(conn, bank, "ai_ml_engineer", limit=30)
     assert result.source == "corpus"
     assert result.keywords == [("XGBoost", 25), ("PyTorch", 10)]
 
 
-def test_top_corpus_keywords_respects_limit(conn):
-    from jobengine.profiles.brief import _top_corpus_keywords
+def testtop_corpus_keywords_respects_limit(conn):
+    from jobengine.profiles.brief import top_corpus_keywords
 
     for i in range(5):
         _insert_corpus_row(conn, "ai_ml_engineer", f"kw{i}", i)
 
     bank = _bank([])
-    result = _top_corpus_keywords(conn, bank, "ai_ml_engineer", limit=2)
+    result = top_corpus_keywords(conn, bank, "ai_ml_engineer", limit=2)
     assert len(result.keywords) == 2
     assert result.keywords[0][0] == "kw4"
 
 
-def test_top_corpus_keywords_falls_back_to_bank_frequency_when_corpus_is_empty(conn):
-    from jobengine.profiles.brief import _top_corpus_keywords
+def testtop_corpus_keywords_falls_back_to_bank_frequency_when_corpus_is_empty(conn):
+    from jobengine.profiles.brief import top_corpus_keywords
 
     bank = _bank(
         [
@@ -176,7 +176,7 @@ def test_top_corpus_keywords_falls_back_to_bank_frequency_when_corpus_is_empty(c
             )
         ]
     )
-    result = _top_corpus_keywords(conn, bank, "ai_ml_engineer", limit=30)
+    result = top_corpus_keywords(conn, bank, "ai_ml_engineer", limit=30)
     assert result.source == "bank_frequency"
     assert result.keywords[0] == ("Python", 2)
     assert ("SQL", 1) in result.keywords

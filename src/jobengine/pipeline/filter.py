@@ -99,7 +99,7 @@ def load_filter_config(path: Path = DEFAULT_FILTERS_PATH) -> FilterConfig:
     return FilterConfig(**data)
 
 
-def _phrase_matches(phrase: str, text_lower: str) -> bool:
+def phrase_matches(phrase: str, text_lower: str) -> bool:
     """A single-word phrase matches on word boundaries, so "engineer" does not
     match inside "engineering". A multi-word phrase matches as a plain
     substring, since its own spaces already delimit word boundaries.
@@ -115,16 +115,15 @@ def matches_profiles(job: Job, config: FilterConfig) -> list[str]:
     matched = []
     for profile, profile_config in config.profiles.items():
         if not any(
-            _phrase_matches(alias, title_lower)
-            for alias in profile_config.title_aliases
+            phrase_matches(alias, title_lower) for alias in profile_config.title_aliases
         ):
             continue
         hit_exclusion = any(
-            _phrase_matches(keyword, title_lower)
+            phrase_matches(keyword, title_lower)
             for keyword in profile_config.exclusion_keywords
         )
         overridden = any(
-            _phrase_matches(keyword, title_lower)
+            phrase_matches(keyword, title_lower)
             for keyword in profile_config.exclusion_override_keywords
         )
         if hit_exclusion and not overridden:
@@ -140,7 +139,7 @@ def is_remote(job: Job, config: FilterConfig) -> bool:
         return False
     location_lower = job.location_raw.lower()
     return any(
-        _phrase_matches(synonym, location_lower)
+        phrase_matches(synonym, location_lower)
         for synonym in config.location.remote_synonyms
     )
 
@@ -155,7 +154,7 @@ def is_excluded_employment_type(job: Job, config: FilterConfig) -> bool:
             return True
     title_lower = job.title.lower()
     return any(
-        _phrase_matches(keyword, title_lower)
+        phrase_matches(keyword, title_lower)
         for keyword in config.employment_type.exclude_title_keywords
     )
 
@@ -174,7 +173,7 @@ def is_citizenship_or_clearance_required(
         return False
     description_lower = description.lower()
     return any(
-        _phrase_matches(phrase, description_lower)
+        phrase_matches(phrase, description_lower)
         for phrase in config.citizenship_clearance.exclude_phrases
     )
 
@@ -182,7 +181,7 @@ def is_citizenship_or_clearance_required(
 def is_above_target_seniority(title: str, config: FilterConfig) -> bool:
     title_lower = title.lower()
     return any(
-        _phrase_matches(keyword, title_lower)
+        phrase_matches(keyword, title_lower)
         for keyword in config.seniority.exclude_title_keywords
     )
 
@@ -190,24 +189,23 @@ def is_above_target_seniority(title: str, config: FilterConfig) -> bool:
 def _has_us_signal(text_lower: str, config: FilterConfig) -> bool:
     if _STATE_CODE_PATTERN.search(text_lower):
         return True
-    if any(_phrase_matches(name, text_lower) for name in US_STATE_FULL_NAMES):
+    if any(phrase_matches(name, text_lower) for name in US_STATE_FULL_NAMES):
         return True
-    if any(_phrase_matches(token, text_lower) for token in US_COUNTRY_TOKENS):
+    if any(phrase_matches(token, text_lower) for token in US_COUNTRY_TOKENS):
         return True
     if any(
-        _phrase_matches(abbrev, text_lower)
+        phrase_matches(abbrev, text_lower)
         for abbrev in config.location.us_informal_city_abbreviations
     ):
         return True
     return any(
-        _phrase_matches(name, text_lower)
-        for name in config.location.us_major_city_names
+        phrase_matches(name, text_lower) for name in config.location.us_major_city_names
     )
 
 
 def _has_non_us_signal(text_lower: str, config: FilterConfig) -> bool:
     return any(
-        _phrase_matches(signal, text_lower) for signal in config.location.non_us_signals
+        phrase_matches(signal, text_lower) for signal in config.location.non_us_signals
     )
 
 
