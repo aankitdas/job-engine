@@ -15,6 +15,14 @@ from pydantic import BaseModel
 
 from jobengine.llm.schemas import LLMCallResult, Stage
 
+# Extraction and scoring are meant to be deterministic (specs/05, specs/07):
+# same job, same profile, same answer. Ollama defaults temperature ~0.8 and
+# a random seed per call when neither is set, which is what let job 2809
+# score 0 on one relevance call and 72 on an identical one. Fixed here, at
+# the shared call site, since it applies to all three stages equally.
+TEMPERATURE = 0.2
+SEED = 42
+
 
 class _ChatClient(Protocol):
     async def chat(self, **kwargs: Any) -> Any: ...
@@ -50,7 +58,11 @@ class LocalProvider:
             messages=messages,
             format=schema.model_json_schema(),
             think=False,
-            options={"num_ctx": self.context},
+            options={
+                "num_ctx": self.context,
+                "temperature": TEMPERATURE,
+                "seed": SEED,
+            },
         )
         duration_ms = round((time.monotonic() - started) * 1000)
         parsed = schema.model_validate_json(response.message.content or "")

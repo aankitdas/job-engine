@@ -48,6 +48,7 @@ from jobengine.db.models import (
     RankableScore,
     RelevanceScore,
     Run,
+    get_relevance_score,
     insert_model_eval,
     list_relevance_scores_for_cutoff,
     record_run,
@@ -85,10 +86,23 @@ seniority_match: "under" if the role is below this candidate's level, \
 individual contributor (e.g. manager/director/VP titles).
 keyword_hits: which of the profile's top skills/keywords actually \
 appear in this JD.
-disqualifiers: explicit hard blockers only (e.g. "requires active \
-security clearance", "must be EU-based", "10+ years required"), empty \
-list if none.
-one_line: one sentence explaining the score.
+disqualifiers: a list of short, final blocker phrases only (e.g. \
+"requires active security clearance", "must be EU-based", "10+ years \
+required"), empty list if none. Each item must be a short phrase, at \
+most about ten words, stating one concrete blocking fact -- never a \
+full sentence. Do all of your reasoning about whether something counts \
+as a real blocker silently, before writing anything in this field: it \
+holds only your final answer, not your thought process. Never write \
+words like "wait", "however", "actually", "so", "therefore", "thus", \
+or "let's" in this field, and never explain, justify, or walk through \
+why something is or is not a disqualifier -- if you decide something \
+is not a real blocker, the correct output is to simply leave it out, \
+not to write that reasoning down. A disqualifier you decided does NOT \
+apply must never lower the relevance score either; score relevance \
+purely on fit once disqualifiers is finalized.
+one_line: one sentence explaining the score. Must be consistent with \
+the score itself -- do not describe a strong or excellent fit here if \
+you are also scoring this job low.
 
 Job description:
 {description}"""
@@ -105,6 +119,7 @@ class RelevanceSchema(BaseModel):
 class RelevanceConfig(BaseModel):
     disqualifier_blocklist: list[str] = []
     freshness_window_days: int | None = None
+    min_relevance_score: int = 0
 
 
 def load_relevance_config(
@@ -330,6 +345,25 @@ def apply_relevance_cutoff(
     update_relevance_selection(conn, profile, selected)
     conn.commit()
     return len(selected)
+
+
+def passes_relevance_floor(
+    conn: sqlite3.Connection, job_id: int, profile: str, config: RelevanceConfig
+) -> bool:
+    """An independent minimum-score gate for F1's queue, separate from
+    select_top_n/apply_relevance_cutoff's top-N ranking: daily_cap stays
+    deliberately null (D23, no real day-over-day inflow to calibrate
+    against yet), which makes select_top_n select every scored row and
+    relevance_scores.selected uniformly 1 in production today -- not a
+    usable signal for "is this actually a poor fit." min_relevance_score
+    is that signal instead. Fails open on an unscored (job, profile): C4's
+    nightly batch and F1's lazy per-request trigger run on independent
+    schedules, so a job that just cleared B3 may not have a relevance
+    row yet, and an unscored job is not evidence of a poor fit."""
+    score = get_relevance_score(conn, job_id, profile)
+    if score is None:
+        return True
+    return score.score >= config.min_relevance_score
 
 
 # ---------------------------------------------------------------------------

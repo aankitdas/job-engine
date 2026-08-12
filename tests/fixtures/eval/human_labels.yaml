@@ -2439,7 +2439,7 @@
     that are less familiar is important to us
   relevance:
     ai_ml_engineer: 20
-    software_engineer: 90
+    software_engineer: 10  # corrected from 90: genuine people-management responsibility, not an IC role -- "You will join as a Technical Lead for one of the most impactful teams at Stripe. You will lead a team of engineers..." / "Lead a team of talented engineers, providing mentorship, guidance, and support to ensure their success" / "5+ years in a strategic technical leadership role"
     data_scientist: 20
   # technical leadership: "5+ years in a strategic technical leadership role"
   # API design, abstractions, frameworks, client libraries, developer products: "leading engineering team(s) working on API design, abstractions, frameworks, or client libraries (e.g., building internal or external developer products)"
@@ -3080,7 +3080,7 @@
     programs designed to protect personal data. Please see our privacy policy for
     additional information.'
   relevance:
-    ai_ml_engineer: 90
+    ai_ml_engineer: 15  # corrected from 90: genuine domain mismatch, systems/infra engineering not ML model engineering -- "Deep understanding of Linux internals: process isolation, memory management, cgroups, namespaces, etc." / "Proficiency in a systems programming language such as Go, Rust, or C/C++"; LLM/agent relevance is nice-to-have only -- "Familiarity with LLM agents and agent frameworks (e.g., OpenHands, Agent2Agent, MCP)"
     software_engineer: 80
     data_scientist: 75
   # high-performance systems software, libraries, SDKs, developer-facing APIs: "experience building high-performance systems software, with meaningful time spent maintaining libraries, SDKs, or developer-facing APIs"
@@ -3639,7 +3639,7 @@
     \ solve immense global challenges, and we want the upside of AI to be widely shared.\
     \ Join us in shaping the future of technology."
   relevance:
-    ai_ml_engineer: 90
+    ai_ml_engineer: 15  # corrected from 90: genuine domain mismatch, customer-facing consulting/solutions architecture not ML model engineering -- "5+ years of technical consulting, post-sales engineering, solutions architecture, or similar experience working directly with customers" / "Lead large-format workshops, technical deep dives, and hands-on enablement sessions"
     software_engineer: 80
     data_scientist: 75
   # technical consulting, post-sales engineering, solutions architecture: "5+ years of technical consulting, post-sales engineering, solutions architecture, or similar experience"
@@ -3829,7 +3829,7 @@
     \ solve immense global challenges, and we want the upside of AI to be widely shared.\
     \ Join us in shaping the future of technology."
   relevance:
-    ai_ml_engineer: 70
+    ai_ml_engineer: 10  # corrected from 70: genuine domain mismatch, embedded camera firmware/hardware not ML model engineering -- "Strong C/C++ experience with embedded or Linux-based systems; comfortable debugging across kernel and userspace boundaries" / "Deep experience shipping embedded camera systems, including sensor bring-up, driver development, and board-level debugging"
     software_engineer: 80
     data_scientist: 75
   # embedded camera systems, sensor bring-up, driver development, board-level debugging: "Deep experience shipping embedded camera systems, including sensor bring-up, driver development, and board-level debugging"

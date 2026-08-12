@@ -628,6 +628,118 @@ def test_apply_relevance_cutoff_rerun_demotes_a_job_that_falls_out_of_top_n(conn
 
 
 # ---------------------------------------------------------------------------
+# passes_relevance_floor
+# ---------------------------------------------------------------------------
+
+
+def test_passes_relevance_floor_true_when_unscored(conn):
+    """Fail open: a job C4 hasn't scored yet (nightly batch hasn't
+    reached it, or relevance is disabled) must still surface, same as
+    before C4 existed -- an unscored job is not evidence of a poor fit."""
+    from jobengine.pipeline.relevance import passes_relevance_floor
+
+    job_id = _seed_job(conn)
+
+    assert passes_relevance_floor(
+        conn, job_id, "software_engineer", _relevance_config(min_relevance_score=20)
+    )
+
+
+def test_passes_relevance_floor_false_below_floor(conn):
+    from jobengine.db.models import RelevanceScore, upsert_relevance_score
+    from jobengine.pipeline.relevance import passes_relevance_floor
+
+    job_id = _seed_job(conn)
+    upsert_relevance_score(
+        conn,
+        RelevanceScore(
+            job_id=job_id,
+            profile="software_engineer",
+            score=15.0,
+            scored_at="2026-08-07T00:00:00+00:00",
+        ),
+    )
+
+    assert not passes_relevance_floor(
+        conn, job_id, "software_engineer", _relevance_config(min_relevance_score=20)
+    )
+
+
+def test_passes_relevance_floor_true_at_or_above_floor(conn):
+    from jobengine.db.models import RelevanceScore, upsert_relevance_score
+    from jobengine.pipeline.relevance import passes_relevance_floor
+
+    job_id = _seed_job(conn)
+    upsert_relevance_score(
+        conn,
+        RelevanceScore(
+            job_id=job_id,
+            profile="software_engineer",
+            score=20.0,  # exactly at the floor -- inclusive, not exclusive
+            scored_at="2026-08-07T00:00:00+00:00",
+        ),
+    )
+
+    assert passes_relevance_floor(
+        conn, job_id, "software_engineer", _relevance_config(min_relevance_score=20)
+    )
+
+
+def test_passes_relevance_floor_true_when_floor_is_zero(conn):
+    """min_relevance_score defaults to 0 -- every real score (0-100) is
+    >= 0, so the floor is a no-op unless config/relevance.yaml sets it,
+    matching disqualifier_blocklist's own opt-in-by-config shape."""
+    from jobengine.db.models import RelevanceScore, upsert_relevance_score
+    from jobengine.pipeline.relevance import passes_relevance_floor
+
+    job_id = _seed_job(conn)
+    upsert_relevance_score(
+        conn,
+        RelevanceScore(
+            job_id=job_id,
+            profile="software_engineer",
+            score=0.0,
+            scored_at="2026-08-07T00:00:00+00:00",
+        ),
+    )
+
+    assert passes_relevance_floor(
+        conn, job_id, "software_engineer", _relevance_config()
+    )
+
+
+def test_passes_relevance_floor_checks_the_right_profile(conn):
+    """A job scored above the floor for one profile but below it (or
+    unscored) for another must be judged per-profile, not globally."""
+    from jobengine.db.models import RelevanceScore, upsert_relevance_score
+    from jobengine.pipeline.relevance import passes_relevance_floor
+
+    job_id = _seed_job(conn)
+    upsert_relevance_score(
+        conn,
+        RelevanceScore(
+            job_id=job_id,
+            profile="software_engineer",
+            score=90.0,
+            scored_at="2026-08-07T00:00:00+00:00",
+        ),
+    )
+    upsert_relevance_score(
+        conn,
+        RelevanceScore(
+            job_id=job_id,
+            profile="ai_ml_engineer",
+            score=5.0,
+            scored_at="2026-08-07T00:00:00+00:00",
+        ),
+    )
+    config = _relevance_config(min_relevance_score=20)
+
+    assert passes_relevance_floor(conn, job_id, "software_engineer", config)
+    assert not passes_relevance_floor(conn, job_id, "ai_ml_engineer", config)
+
+
+# ---------------------------------------------------------------------------
 # load_relevance_config
 # ---------------------------------------------------------------------------
 
@@ -636,3 +748,4 @@ def test_load_relevance_config_reads_real_config_file():
     config = load_relevance_config(Path("config/relevance.yaml"))
     assert "security clearance" in config.disqualifier_blocklist
     assert config.freshness_window_days is None
+    assert config.min_relevance_score == 20

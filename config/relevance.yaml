@@ -24,3 +24,19 @@ disqualifier_blocklist:
 # means every open (closed_at IS NULL) job is in scope, no window
 # applied yet.
 freshness_window_days: null
+
+# F1's queue gate (passes_relevance_floor, wired into web/app.py's
+# _new_pairs()): a scored (job, profile) below this excludes it from
+# the "not yet reviewed" list, same as a B3-excluded job. Deliberately
+# NOT the same mechanism as daily_cap/select_top_n's top-N ranking --
+# daily_cap stays null (D23), so relevance_scores.selected is 1 for
+# every scored row in production today and isn't a usable signal here.
+# 20 is a conservative starting floor, not a calibrated number: real
+# production data (2026-08) shows most survivor jobs score well above
+# this per profile (ai_ml_engineer/data_scientist have almost nothing
+# below 20; software_engineer has a real 0-19 tail, ~98 of 775 scored
+# jobs at the time this was set), and confirmed-genuine mismatches
+# found during the C4 rho investigation (job_id 2246, 2732, 3283) score
+# 10-15. Revisit once more production data and calibrate sessions
+# exist.
+min_relevance_score: 20

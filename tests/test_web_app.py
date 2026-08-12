@@ -35,6 +35,7 @@ from jobengine.pipeline.filter import (
     ProfileFilterConfig,
     SeniorityConfig,
 )
+from jobengine.pipeline.relevance import RelevanceConfig
 from jobengine.profiles.config import ProfileConfig
 from jobengine.queue.orchestrate import QueueContext
 from jobengine.resume.bank import DEFAULT_BANK_PATH, load_bank
@@ -162,7 +163,15 @@ _EXTRACT_PAYLOAD = {
 }
 
 
-def _ctx(conn, local_client) -> QueueContext:
+def _relevance_config(**overrides) -> RelevanceConfig:
+    fields = {"disqualifier_blocklist": [], "freshness_window_days": None}
+    fields.update(overrides)
+    return RelevanceConfig(**fields)
+
+
+def _ctx(
+    conn, local_client, relevance_config: RelevanceConfig | None = None
+) -> QueueContext:
     return QueueContext(
         conn=conn,
         full_bank=load_bank(DEFAULT_BANK_PATH),
@@ -177,6 +186,7 @@ def _ctx(conn, local_client) -> QueueContext:
         },
         filter_config=_filter_config(),
         llm_config=_llm_config(),
+        relevance_config=relevance_config or _relevance_config(),
         local_client=local_client,
     )
 
@@ -187,8 +197,8 @@ def client_factory(conn):
     wrapping a given local_client, and returns a TestClient. Cleans up
     the override after the test regardless of outcome."""
 
-    def _make(local_client):
-        ctx = _ctx(conn, local_client)
+    def _make(local_client, relevance_config: RelevanceConfig | None = None):
+        ctx = _ctx(conn, local_client, relevance_config)
         app.dependency_overrides[get_ctx] = lambda: ctx
         return TestClient(app)
 
@@ -243,9 +253,7 @@ def test_list_page_shows_pending_entry(conn, client_factory):
     assert "Software Engineer" in response.text
 
 
-def test_list_page_shows_untriggered_job_that_passes_all_filters(
-    conn, client_factory
-):
+def test_list_page_shows_untriggered_job_that_passes_all_filters(conn, client_factory):
     _seed_job(conn, ats_job_id="untriggered", title="Backend Engineer")
     client = client_factory(_FakeClient(_EXTRACT_PAYLOAD))
 
@@ -274,6 +282,81 @@ def test_list_page_omits_untriggered_job_that_fails_a_non_title_b3_check(
 
     assert response.status_code == 200
     assert "Backend Engineer" not in response.text
+
+
+def test_list_page_omits_untriggered_job_scored_below_relevance_floor(
+    conn, client_factory
+):
+    """Wires C4's relevance_scores into F1's queue gate: a job that
+    passes B3 in full but was scored below the configured floor by C4
+    must not surface as a "not yet reviewed" candidate, same as a
+    B3-excluded job doesn't."""
+    from jobengine.db.models import RelevanceScore, upsert_relevance_score
+
+    job_id = _seed_job(conn, ats_job_id="low-relevance", title="Backend Engineer")
+    upsert_relevance_score(
+        conn,
+        RelevanceScore(
+            job_id=job_id,
+            profile="software_engineer",
+            score=10.0,
+            scored_at="2026-08-07T00:00:00+00:00",
+        ),
+    )
+    client = client_factory(
+        _FakeClient(_EXTRACT_PAYLOAD),
+        relevance_config=_relevance_config(min_relevance_score=20),
+    )
+
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert "Backend Engineer" not in response.text
+
+
+def test_list_page_shows_untriggered_job_scored_at_or_above_relevance_floor(
+    conn, client_factory
+):
+    from jobengine.db.models import RelevanceScore, upsert_relevance_score
+
+    job_id = _seed_job(conn, ats_job_id="ok-relevance", title="Backend Engineer")
+    upsert_relevance_score(
+        conn,
+        RelevanceScore(
+            job_id=job_id,
+            profile="software_engineer",
+            score=20.0,
+            scored_at="2026-08-07T00:00:00+00:00",
+        ),
+    )
+    client = client_factory(
+        _FakeClient(_EXTRACT_PAYLOAD),
+        relevance_config=_relevance_config(min_relevance_score=20),
+    )
+
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert "Backend Engineer" in response.text
+
+
+def test_list_page_shows_untriggered_job_with_no_relevance_score_yet(
+    conn, client_factory
+):
+    """Fail open: C4's nightly batch hasn't necessarily scored a job
+    that just cleared B3 minutes ago (they run on independent
+    schedules) -- an unscored job must still surface, not be treated as
+    a rejection."""
+    _seed_job(conn, ats_job_id="unscored", title="Backend Engineer")
+    client = client_factory(
+        _FakeClient(_EXTRACT_PAYLOAD),
+        relevance_config=_relevance_config(min_relevance_score=20),
+    )
+
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert "Backend Engineer" in response.text
 
 
 def test_approve_flips_review_status_and_creates_application(conn, client_factory):

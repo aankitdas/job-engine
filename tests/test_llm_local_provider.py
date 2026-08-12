@@ -5,7 +5,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from jobengine.llm.providers.local import LocalProvider
+from jobengine.llm.providers.local import SEED, TEMPERATURE, LocalProvider
 
 
 def _run(coro):
@@ -93,7 +93,27 @@ def test_call_uses_configured_context_window():
         )
     )
 
-    assert client.calls[0]["options"] == {"num_ctx": 16384}
+    assert client.calls[0]["options"] == {
+        "num_ctx": 16384,
+        "temperature": TEMPERATURE,
+        "seed": SEED,
+    }
+
+
+def test_call_uses_fixed_temperature_and_seed_for_determinism():
+    client = _FakeClient(_FakeResponse('{"ok": true}'))
+    provider = _provider(client)
+
+    _run(
+        provider.call(
+            stage="relevance",
+            messages=[{"role": "user", "content": "hi"}],
+            schema=_PingSchema,
+        )
+    )
+
+    assert client.calls[0]["options"]["temperature"] == 0.2
+    assert client.calls[0]["options"]["seed"] == SEED
 
 
 def test_call_returns_accounting_envelope_with_zero_cost():

@@ -16,7 +16,7 @@ import asyncio
 import hashlib
 import json
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -40,6 +40,7 @@ from jobengine.db.models import (
 from jobengine.llm.schemas import LLMConfig
 from jobengine.pipeline.extract import analyze_job
 from jobengine.pipeline.filter import FilterConfig
+from jobengine.pipeline.relevance import RelevanceConfig
 from jobengine.profiles.config import ProfileConfig
 from jobengine.resume.bank import Bank
 from jobengine.resume.render import Identity
@@ -59,6 +60,7 @@ class QueueContext:
     profile_configs: dict[str, ProfileConfig]
     filter_config: FilterConfig
     llm_config: LLMConfig
+    relevance_config: RelevanceConfig = field(default_factory=RelevanceConfig)
     local_client: Any | None = None
 
 

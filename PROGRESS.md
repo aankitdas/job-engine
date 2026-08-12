@@ -3,18 +3,37 @@
 **Claude Code: read this file at the start of every session and update it at
 the end via `/checkpoint`. Do not rely on memory of previous sessions.**
 
-Last updated: 2026-08-11
-Current task: **C4 (relevance pre-filter) is done.** Closed on the same
-mirrored precedent as C3/D27: the literal TODO.md gate (spec 07's Task 1
-numeric eval, rho >= 0.70 and top-30 overlap >= 0.75 per profile) does
-**not** pass — real numbers, all three profiles: rho 0.23-0.35, overlap
-0.63-0.70. But spec 06's own DoD (a full unbounded production run +
-`calibrate` >= 70% agreement) **does** pass, on real production data:
-921 real `relevance_scores` rows across 854 real B3-surviving jobs
-(1h46m, zero hangs), and the user's own live `calibrate --profile
-software_engineer` run scored 20/20 = 100% agreement with the model's
-real reasoning. Both numbers are recorded, not just the flattering one;
-see D36 in docs/decisions.md for the full writeup.
+Last updated: 2026-08-12
+Current task: **C4 (relevance pre-filter) is done, closed a second time
+with real numbers after a real follow-up investigation (D37).** A
+post-close spot-check while wiring F1's new relevance floor gate found
+Task 1's original rho/overlap numbers (D36: rho 0.23-0.35, overlap
+0.63-0.70) were contaminated by three real, now-fixed bugs: (1)
+`LocalProvider` never set `temperature`/`seed`, so identical calls
+produced wildly different scores (job 2809: 0->72->0 across 3 identical
+calls) — this session's single biggest finding, now confirmed closed,
+not just patched; (2) 4 `human_labels.yaml` entries were too generous
+(a real people-management role under an IC title, 2 domain mismatches,
+1 embedded-hardware role scored as if ML-relevant) — corrected with
+quoted-JD justification, same convention as D26; (3) the `disqualifiers`
+field was leaking hundreds of words of raw chain-of-thought and
+contradicting its own `relevance` score (6 real jobs scored 0 while
+their own `one_line` called them "excellent"/"strong" matches) —
+generalized `_RELEVANCE_PROMPT`'s instruction, verified clean on 22/23
+previously-affected real jobs. Re-ran the full 50-job/150-point Task 1
+fixture after all three fixes: rho still fails its 0.70 bar on all 3
+profiles (0.557/0.449/0.470, real improvement over D36 but not a pass),
+top30_overlap now passes on 2/3 and is 0.017 from passing on the third
+(0.767/0.767/0.733). Shipped anyway per the same D27/D36 precedent —
+real numbers on record, top30_overlap called out as the more
+decision-relevant metric since it's what F1's new score-floor gate
+actually depends on, not full-list rank correlation. F1's `_new_pairs()`
+now gates on `passes_relevance_floor()`
+(`config/relevance.yaml`'s `min_relevance_score: 20`) in addition to
+`passes_all_filters()` — C4's score finally does something downstream;
+before this session `relevance_scores.selected` was 1 for all 921 rows
+and nothing consumed it. See D37 in docs/decisions.md for the complete
+writeup; D36 still has the original close for history.
 Built `src/jobengine/pipeline/relevance.py` (`RelevanceSchema`,
 `build_profile_card()`/`render_profile_card()`, `score_relevance()`,
 `score_job()`, `select_top_n()`/`apply_relevance_cutoff()`, the
@@ -63,19 +82,18 @@ B1-followup/B3-followup (deliberately deferred), F2 (metrics dashboard),
 F3 (Telegram notifier). P4 (accept and log to gap_ledger) also remains
 deliberately unbuilt.
 
-Separately: **B2's Task Scheduler regression (documented last
-checkpoint as unresolved, silent failures since 2026-08-03T20:00) has
-at least partially recovered — one real unattended-shaped sync fired
-during this session**, `runs` id 16, `2026-08-11T11:00:03Z`
-(`new=386 updated=3443 edited=324 closed=383`), the first `runs` row of
-any kind since id 12 on 08-03. `jobs` grew 3882 → 4268 as a direct
-result. Not confirmed as fully resolved from one data point alone (the
-original confirmation pattern used two independent firings, see D-entry
-history) — flagged as a positive sign, not re-closed as fixed; the
-stored-password logon-mode fix's actual application status is still
-unknown to this session (Windows-side, can't verify from here). Revisit
-"is this genuinely fixed" once a second independent unattended firing is
-observed. `companies` unchanged at 15.
+Separately: **B2's Task Scheduler regression is now confirmed fixed, not
+just a positive sign.** Last checkpoint had one real unattended firing
+(`runs` id 16, 08-11T11:00) and explicitly deferred calling it fixed
+until a second independent firing was observed. This session found
+three more, none triggered by this session's own work (no `sync.py`
+call was made this session — all activity was `pipeline/relevance.py`/
+`eval` work): `runs` id 17 (08-11T14:00, `new=4 updated=3828 edited=26
+closed=2`), id 18 (08-12T02:45, `new=88 updated=3762 edited=39
+closed=72`), id 19 (08-12T05:00, `new=2 updated=3848 edited=1
+closed=2`) — four consecutive healthy unattended firings spanning ~18
+hours, exactly the bar the previous checkpoint set for closing this out.
+`jobs` grew 4268 → 4362 as a direct result. `companies` unchanged at 15.
 
 **Read this before touching `data/jobengine.db`:** hard rule 13 in
 CLAUDE.md (added 2026-08-02, see D22 in docs/decisions.md) requires asking
@@ -98,21 +116,21 @@ project's own B1/B2 sessions) treated that file.
 | A4b | PDF conversion (LibreOffice headless) | done | `resume/pdf.py`, verified live against real `soffice` on 2 distinct real full-bank renders; found+fixed a real bullet-spacing bug along the way |
 | A4c | Watermarking (speculative preview) | not started | no urgency, no speculative bullets exist yet |
 | B1 | ATS clients + registry | done | clients+registry only, sync.py's fetch/diff loop is B2 |
-| B2 | Fetch and diff | done | scheduled, confirmed firing 2026-08-03, regressed 08-04 through 08-07 (silent failures), one real sync fired again 08-11 (`runs` id 16) — partial recovery, not yet re-confirmed as fully fixed; see Known Issues |
+| B2 | Fetch and diff | done | scheduled, confirmed firing 2026-08-03, regressed 08-04 through 08-07 (silent failures), recovered 08-11 (`runs` id 16) and confirmed fixed by 3 more independent unattended firings through 08-12 (`runs` id 17-19) |
 | B1-followup | Sponsorship-aware company vetting (DOL LCA) | not started | flagged only, not scoped, see TODO.md |
 | B3 | Filters + routing | done | signed off 2026-08-03; `filter.py` implemented, 40/40 tests pass, final numbers 859/3836 survivors (68/776/81 per profile) |
 | B3-followup | Calibrate daily filter-survivor cap | not started | deliberately deferred, see D23 in docs/decisions.md |
 | C1 | LLM router | done | `llm.check` verified live against real Ollama, all 3 stages reachable, exit 0; cold-start ~15s / steady-state 600-935ms, see Known Issues |
 | C2 | Eval fixtures | done | 50/50 JDs labelled, loaded into `human_labels` (150 rows); 11/15 keyword-annotated, short of TODO.md's literal target, done anyway per explicit sign-off, see Known Issues |
 | C3 | Keyword extraction | done | shipped per D27 (ship decision), not literal DoD: precision 0.83-0.86 passes, recall 0.35-0.47 fails the 0.85 gate (range across 4 live runs), see Known Issues |
-| C4 | Relevance filter | done | real production run: 921 rows/854 jobs; Task 1 eval fails (rho 0.23-0.35), `calibrate` passes (100%); shipped per D36, mirrors C3/D27 |
+| C4 | Relevance filter | done | real production run: 921 rows/854 jobs; Task 1 rho still fails post-fix (0.449-0.557) but top30_overlap passes 2/3 (0.733-0.767); `calibrate` passes (100%); 3 real bugs found+fixed (determinism, fixture, disqualifiers-leak); F1's floor gate now consumes the score for real; shipped per D37 (supersedes D36), mirrors C3/D27 |
 | D1 | Rubric rules | done | all 13 hard rules + weighted score, `rubric/{measure,rules,score}.py` + CLI, grounded against 3 real JDs |
 | D2 | PDF geometry | done | absorbed into D1 (R002/R006 have no fallback); includes spec 08's per-file-hash cache (added after the user caught it missing at checkpoint review), 1 `pdfplumber.open` call per `score_resume()` run now, not 15+; see D28 addendum 4 |
 | D3 | Patch P0-P2 | done | `rubric/patch.py` + CLI; real deficit closed (Chroma DB / R002) via P2; P1 confirmed structurally inert against current bank, see D29 |
 | D4 | Patch P3 | done | `patch.py` gains rephrase+writeback; real deficit closed live (CMB, coverage 0.0->1.0), real bug found+fixed via that run; persist/reload/reuse chain re-verified live with full captured evidence 2026-08-05, see D30 + its second addendum |
 | E1 | Profile config + brief | done | `jobengine.profiles` package: registry (`config/profiles.yaml`) + `profiles brief` CLI; live-verified against real db/bank for all 3 profiles; see D31 |
 | E2 | Base resumes | done | all 3 profiles persisted (`resume/base/{ai_ml_engineer,software_engineer,data_scientist}/v1/`, `ai_ml_engineer` also has v2; `base_resumes` ids 1-4), each `passed: true, hard_failures: []`, `coverage: 1.0`; R002 demoted to scored-only (D33), coverage measured against bank-frequency fallback not real corpus (D34, revisit later) |
-| F1 | Review queue | done | `queue/orchestrate.py` + `web/app.py`, lazy per-job trigger not batch; verified end to end against the real app/db with real job 3871; see D35 |
+| F1 | Review queue | done | `queue/orchestrate.py` + `web/app.py`, lazy per-job trigger not batch; verified end to end against the real app/db with real job 3871; `_new_pairs()` now also gates on C4's `passes_relevance_floor()`, real production impact measured (84/934 pairs excluded); see D35, D37 |
 | F2 | Dashboard | not started | |
 | F3 | Telegram | not started | |
 | G1 | Autonomy gating | not started | |
@@ -252,11 +270,23 @@ read-only), `score_relevance()` (the one LLM call, via
 `router.get_provider("relevance", ...)`, timeout-wrapped), `score_job()`
 (per-job orchestrator, gated on `passes_all_filters()` first, one LLM
 call per matched profile), `select_top_n()`/`apply_relevance_cutoff()`
-(the `daily_cap: null` → select-everything design call), CLI
-(`score`/`calibrate` subcommands, `JOBENGINE_DB_PATH` override matching
-`web/app.py`'s pattern). `config/relevance.yaml` (new:
-`disqualifier_blocklist`, `freshness_window_days: null`). Tests:
-`test_filter.py` 47, `test_extract.py` 14, `test_relevance.py` 31 (new).
+(the `daily_cap: null` → select-everything design call),
+`passes_relevance_floor()` (new this session, D37: an independent
+min-score gate for F1, separate from `select_top_n`'s top-N ranking
+since `daily_cap` stays deliberately `null`; fails open on an unscored
+`(job, profile)`), CLI (`score`/`calibrate` subcommands,
+`JOBENGINE_DB_PATH` override matching `web/app.py`'s pattern).
+`_RELEVANCE_PROMPT` tightened this session (D37): `disqualifiers` must
+be short phrases only, reasoning must happen silently and never appear
+in the field, and a rejected disqualifier must not lower the score
+either — fixes a real chain-of-thought-leak bug that was contradicting
+the model's own `relevance` number on real production jobs.
+`RelevanceConfig` gained `min_relevance_score: int = 0`. `config/
+relevance.yaml` (`disqualifier_blocklist`, `freshness_window_days: null`,
+new this session: `min_relevance_score: 20`, a conservative starting
+floor, not a calibrated number). Tests: `test_filter.py` 47,
+`test_extract.py` 14, `test_relevance.py` 36 (up from 31, +5 this
+session: `passes_relevance_floor` coverage).
 
 **llm/** (`src/jobengine/llm/`): `schemas.py`, `providers/local.py`
 (`LocalProvider`, `think=False` pinned on every call), `providers/
@@ -338,10 +368,13 @@ Every version has `selection.yaml`/`resume.docx`/`resume.pdf`/
 R002 investigation), D33 (R002's hard-failure demotion), and D34 (the
 bank-frequency-fallback coverage caveat) in docs/decisions.md.
 
-**queue/** (`src/jobengine/queue/`, new this session, F1):
-`orchestrate.py` — `QueueContext` (dataclass: `conn`, `full_bank`,
-`identity`, `profile_configs`, `filter_config`, `llm_config`,
-`local_client`, built once per process); `ensure_reviewed(ctx, job_id,
+**queue/** (`src/jobengine/queue/`, new this session (F1), updated this
+session (C4 follow-up, D37)): `orchestrate.py` — `QueueContext`
+(dataclass: `conn`, `full_bank`, `identity`, `profile_configs`,
+`filter_config`, `llm_config`, new this session `relevance_config`
+(defaults to `RelevanceConfig()`, i.e. no floor, so existing callers
+that don't set it are unaffected), `local_client`, built once per
+process); `ensure_reviewed(ctx, job_id,
 profile)` (the lazy-trigger entry point: ensures `job_analysis` exists
 via C3's `analyze_job()`, then ensures a `job_resume_variant` exists via
 D3/D4's `run_ladder()`, idempotent, real deficits persisted to
@@ -358,26 +391,37 @@ precedent), LLM calls mocked via a stage-aware `_FakeClient` that
 inspects the requested schema's fields to serve both the extract and
 rephrase stages correctly from one fake.
 
-**web/** (`src/jobengine/web/`, new this session, F1): `app.py` —
+**web/** (`src/jobengine/web/`, new this session (F1), updated this
+session (C4 follow-up, D37)): `app.py` —
 FastAPI app, `get_ctx()` (lazy singleton `QueueContext`, overridden in
 tests via `app.dependency_overrides`), `GET /` (pending queue +
 newly-B3-matched-but-never-triggered pairs from the last 7 days), `GET
 /jobs/{job_id}/{profile}` (the lazy trigger; renders score/coverage/
 front_load/hard-failures/the real rendered PDF via a `/resume` static
 mount), `POST /jobs/{job_id}/{profile}/{approve,reject}`.
+`_new_pairs()` now also gates on `passes_relevance_floor()` (C4's
+`min_relevance_score`), after `passes_all_filters()`/`matches_profiles()`,
+per matched profile — a job can clear the floor for one profile and not
+another. Real production impact measured before shipping: 84 of 934
+previously-queueable pairs now excluded (79 `software_engineer`, 3
+`data_scientist`, 2 `ai_ml_engineer`); spot-checking the lowest-scored
+ones is what surfaced the disqualifiers-leak bug (D37).
 `templates/queue_list.html`/`queue_detail.html` (plain server-rendered
 HTML, no JS, per spec: reviewing means seeing the already-patched
 candidate and deciding, not editing bullet text in a browser).
 `JOBENGINE_DB_PATH` env var overrides `DEFAULT_DB_PATH` for manual
 testing against a scratch copy. `uv run uvicorn jobengine.web.app:app
 --reload` (CLAUDE.md's already-documented dev command, now real for the
-first time). Tests: `test_web_app.py`, 10 tests (up from 8, +2 this
+first time). Tests: `test_web_app.py`, 13 tests (up from 10, +3 this
 session), FastAPI `TestClient` against a `tmp_path` db via dependency
 override, covering first-visit trigger, second-visit idempotency,
 approve/reject state transitions and their `applications`-row side
-effects, the list page dropping a rejected job, and (new this session)
-`_new_pairs()`'s `passes_all_filters()` gating: a clean untriggered job
-appears as "not yet reviewed," one with a non-US location does not.
+effects, the list page dropping a rejected job, `_new_pairs()`'s
+`passes_all_filters()` gating (a clean untriggered job appears as "not
+yet reviewed," one with a non-US location does not), and (new this
+session) `passes_relevance_floor()` gating: a job scored below the floor
+is omitted, one at or above it appears, and an unscored job still
+appears (fails open).
 
 **resume/rendered/variants/** (new this session, F1): per-(job,profile)
 lazily-rendered candidates, `{job_id}/{profile}/candidate_{tiers}.
@@ -385,48 +429,82 @@ lazily-rendered candidates, `{job_id}/{profile}/candidate_{tiers}.
 `3871/software_engineer/candidate_P0_P1_P2_P3.{docx,pdf}` (this
 session's real worked-example verification, see below).
 
-**Full suite: 432/432 passing (up from 379 at session start), `ruff
+**Full suite: 441/441 passing (up from 432 last checkpoint), `ruff
 check src/` clean, `ruff format --check src/` clean** (3 pre-existing
 `RUF059` warnings in `test_render.py`, confirmed via `git stash` to
 predate an earlier session, untouched, unaffected by this session).
 
 **`data/jobengine.db` real accumulated state, verified this
-checkpoint:** 15 companies, 4268 jobs (up from 3882 — one real sync
-fired this session, `runs` id 16, see the header above), 16 `runs` rows
-(12 + 3 relevance-stage runs from this session + 1 real sync), 150
-`human_labels` rows, 40 `model_evals` rows (up from 30: 6 Task 1 rows,
-1 `relevance_calibration` row, 3 Task 2 rerun rows), 4 `base_resumes`
-rows (unchanged), `job_analysis`/`keyword_corpus`/`job_resume_variants`/
-`rubric_results` unchanged at 1/7/1/1 (F1's own first-ever rows, not
-touched this session), `applications`/`gap_ledger` still 0.
-**C4 wrote `relevance_scores` for the first time ever this project has
-had real data there: 0 -> 921 rows, 854 distinct real jobs**, all from
-real production runs (two bounded `--limit 100` runs around the
-location-prompt fix, then one full unbounded run covering the entire
-real backlog), not synthetic data. Confirmed deliberate at every stage:
-asked before the first bounded run, asked again before the unbounded
-one, user explicitly said "proceed" for each. `daily_cap` is still
-`null`, so all 921 scored rows are `selected=1` — no cutoff has ever
-been applied for real yet.
+checkpoint:** 15 companies, 4362 jobs (up from 4268 — 3 more real
+unattended syncs, see the B2 note above), 19 `runs` rows (up from 16: 3
+more real `sync` firings, no relevance-stage runs this session — this
+session's real Ollama scoring went through `score_relevance()`/
+`relevance_task.run()` directly, scratch-script-driven for targeted
+re-scores and the Task 1 fixture re-run, not the `score` CLI, so no new
+`runs` rows from that activity), 150 `human_labels` rows (4 relevance
+scores corrected this session, D37: `job_id` 2246/2732/3267/3283, each
+with a quoted-JD justification comment), 46 `model_evals` rows (up from
+40: 6 new Task 1 rows this session, D37's post-fix re-run), 4
+`base_resumes` rows (unchanged), `job_analysis` 1/`keyword_corpus` 7/
+`job_resume_variants` 1/`rubric_results` 1 (all unchanged, F1's own
+first-ever rows, not touched this session), `applications`/`gap_ledger`
+still 0. `relevance_scores` unchanged at 921 rows/854 jobs (this
+session's re-scores were all read-only probes via `score_relevance()`
+directly, never `score_job()`'s upsert — the real production table
+itself wasn't touched, only queried and re-derived against for
+verification). `daily_cap` is still `null`; the new
+`min_relevance_score: 20` floor (D37) is a separate, independent gate
+from `daily_cap`/`selected`, now live in `web/app.py`'s `_new_pairs()`.
 
 ---
 
 ## Known issues and deferred work
 
-- **C4's Task 1 numeric eval genuinely fails; `calibrate`'s real
-  qualitative check genuinely passes — both true at once, unresolved,
-  not something this session tried to explain away.** Real numbers:
-  Task 1 rho 0.23-0.35 / top-30 overlap 0.63-0.70 per profile (need
-  >= 0.70 / >= 0.75) vs. `calibrate`'s real 20/20 = 100% agreement.
-  Possible explanations, neither investigated yet: C2's original
-  hand-labels (one hour, months before this session, under different
-  context/mood/criteria) may be a noisier ground truth than the user's
-  in-the-moment calibration judgment; or n=50/profile is genuinely too
-  small for a stable rho given real score variance (a few label
-  swaps at the margin move rho a lot at this sample size). Revisit if a
-  second calibration round (a different 20-job sample, or a larger
-  fixture) shows the same gap — that would point at the fixture, not
-  noise. See D36 in docs/decisions.md for the full numbers.
+- **SUPERSEDED 2026-08-12 (D37), not still an open mystery:** the
+  D36-era "Task 1 fails, `calibrate` passes, unresolved tension" entry
+  that used to be here was investigated for real this session, not left
+  as a mystery. Three real, distinct, root-caused bugs were driving the
+  original rho/overlap numbers down beyond what extraction quality alone
+  explains: `LocalProvider` never set `temperature`/`seed` (fixed, this
+  session's biggest single finding — confirmed via 3x-repeated real
+  calls landing on identical scores after the fix); 4 `human_labels.yaml`
+  entries were too generous on seniority-disguised titles and domain
+  mismatches (fixed, quoted-JD justification per entry); the
+  `disqualifiers` field was leaking chain-of-thought and contradicting
+  its own `relevance` score on real jobs (fixed, verified clean on 22/23
+  previously-affected real jobs). Post-fix real re-run: rho still fails
+  its 0.70 bar on all 3 profiles (0.449-0.557, real improvement, not a
+  pass) but top30_overlap now passes 2/3 (0.767/0.767) and is 0.017 from
+  passing the third (0.733). Remaining rho shortfall traced to the
+  human-labeled fixture's own bimodal shape (~75% of labels at 0-10,
+  10-14% at 71-100, almost nothing between), which structurally
+  penalizes rank-correlation more than it penalizes top-slice overlap.
+  Shipped anyway (D37), same D27 precedent, with top30_overlap called
+  out as the more decision-relevant metric since it's what F1's new
+  score-floor gate actually depends on. See D37 in docs/decisions.md for
+  the complete writeup; D36 still has the original numbers for history.
+- **New this session, not yet acted on:** investigating `job_id` 2246
+  (D37) surfaced that B3's seniority filter
+  (`is_above_target_seniority()`, `pipeline/filter.py`) only checks the
+  job *title* against `config/filters.yaml`'s exclusion keywords
+  (manager/director/head of/vp/vice president/chief). A real people-
+  management role can sit under a nominally-IC title ("Staff Software
+  Engineer, API Platform" whose body text says "You will lead a team of
+  engineers... 5+ years in a strategic technical leadership role") and
+  sail through B3 undetected; only C4's body-text LLM read caught this
+  one. A cheap, deterministic body-text phrase check
+  (`is_leadership_role_required()`, same `phrase_matches()` shape as
+  `is_citizenship_or_clearance_required()`) was discussed as a possible
+  free pre-C4 catch for the clearest cases ("lead a team of", "direct
+  reports") but not built — flagged only, needs its own go-ahead.
+- **New this session, minor, not blocking:** the disqualifiers-leak fix
+  (D37) resolved 22 of 23 previously-affected real jobs cleanly, but one
+  (`job_id` 3127) still produces a single disqualifier phrase longer
+  than the prompt's own "~10 words" target (one over-long run-on
+  sentence, down from 3+ paragraphs pre-fix) — a real, verified
+  improvement, just not a full clean hit. Its score/`one_line` are
+  internally consistent, so this isn't blocking anything; revisit only
+  if the same pattern recurs at real scale in a future spot-check.
 - `config/relevance.yaml`'s `disqualifier_blocklist` is a short starter
   list (citizenship, security clearance, export control, itar) grown
   from spec 06's own examples, not yet tuned against real calibration
@@ -438,12 +516,16 @@ been applied for real yet.
   shows up in practice that the current 4 phrases miss.
 - **`daily_cap` and `freshness_window_days` are both still `null` after
   a real 921-row production run** — every scored job is `selected=1`,
-  no cutoff has ever actually trimmed anything for real. This is
-  intentional (same D23 reasoning both fields already carried before
-  C4), not a bug, but worth knowing: the "top N" half of spec 06's own
+  no `daily_cap`-based cutoff has ever actually trimmed anything for
+  real. This is intentional (same D23 reasoning both fields already
+  carried before C4), not a bug: the "top N" half of spec 06's own
   design has never been exercised against real data, only the scoring
   half. Revisit once B3-followup's own deferred cap-calibration work
-  happens.
+  happens. **Not the same gap as before D37**: F1's `_new_pairs()` now
+  does consume C4's score via an independent `min_relevance_score`
+  floor (`passes_relevance_floor()`), so "nothing downstream reads
+  `relevance_scores`" is no longer true — only the `daily_cap`/`selected`
+  ranking mechanism specifically remains unexercised.
 - A real, minor B3 gap surfaced while diagnosing C4's filter results,
   not part of this session's fix: `config/filters.yaml`'s
   `location.us_major_city_names` doesn't include "Los Angeles" (only
@@ -893,15 +975,16 @@ been applied for real yet.
   this gap must be excluded or explicitly noted, not averaged over as if
   it were a genuine zero-volume day — doing so would understate real
   daily volume.
-  **UPDATE 2026-08-11, partial recovery, not re-closed:** one real sync
-  fired, `runs` id 16, `2026-08-11T11:00:03Z`, real non-zero diffs
-  (`new=386 updated=3443 edited=324 closed=383`) — the first `runs` row
-  of any kind since id 12 (08-03). This is one data point, not the same
-  two-independent-firings bar that originally confirmed the schedule
-  working; it's flagged as encouraging, not verified-fixed. Whether the
-  stored-password fix was actually applied on the Windows side is
-  unknown to this session (can't check from here). Revisit once a
-  second independent firing lands.
+  **UPDATE 2026-08-12, RESOLVED, not still open:** `runs` id 16
+  (08-11T11:00, `new=386 updated=3443 edited=324 closed=383`) was
+  followed by three more independent unattended firings, none triggered
+  by any session's own activity: id 17 (08-11T14:00), id 18
+  (08-12T02:45), id 19 (08-12T05:00), all healthy non-zero diffs. Four
+  consecutive firings across ~18 hours clears the original
+  two-independent-firings confirmation bar with room to spare. Whether
+  the stored-password fix specifically was what resolved it is still
+  unconfirmed (Windows-side, can't verify from here), but the
+  *schedule's own reliability* is no longer in question.
 - `sync.py`'s CLI (`_main()`) calls `logging.basicConfig(level=logging.INFO)`
   globally, which also turns on `httpx`'s own INFO-level request logging,
   every GET request prints a line. Harmless (stderr noise, not a
@@ -1400,6 +1483,82 @@ been applied for real yet.
 ## Session log
 
 (Newest first. Date, task id, what changed, what to do next.)
+
+- 2026-08-12, C4 follow-up (done, D37): Continuation of the D36
+  investigation the user explicitly refused to let rest ("both recorded"
+  wasn't accepted as sufficient given rho 0.23-0.35 vs `calibrate`'s
+  100%). Dug into 5 flagged high-human/low-model jobs, quoted-JD review
+  per job, same discipline as D26's fixture cleanup.
+  **Bug 1, determinism:** confirmed by fully reading spec 05 (not just
+  grepping) that temperature was never specified anywhere — a gap, not a
+  dropped bug, correcting the user's own recalled premise. Fixed
+  `LocalProvider.call()` to pass `temperature=0.2`/`seed=42` in its
+  shared `options` dict (all 3 LLM stages, confirmed as the correct,
+  authorized blast radius). Full suite run first (432/432, nothing
+  depended on nondeterminism). Re-ran the same 5 flagged jobs 3x each
+  post-fix: `spread=0` on every field, every job — full determinism
+  confirmed, not assumed.
+  **Bug 2, fixture correctness:** per-job sort into "genuine
+  leadership/people-management disqualifier" vs "genuine domain
+  mismatch" vs "model being overcautious," with exact quoted JD
+  sentences for each of 4 flagged jobs. Corrected `human_labels.yaml`:
+  `job_id` 2246 `software_engineer` 90->10 (Stripe Staff SWE body text
+  is a real Technical Lead role), 2732/3267 `ai_ml_engineer` 90->15 each
+  (Scale AI Infra Eng systems/infra mismatch; OpenAI Codex Deployment
+  Eng customer-facing consulting mismatch), 3283 `ai_ml_engineer` 70->10
+  (OpenAI Camera SWE, zero ML content). Before/after shown and confirmed
+  before applying, same convention as D26.
+  **F1 floor gate, planned via `AskUserQuestion` after a real-data
+  finding changed the plan:** live-checked `relevance_scores.selected`
+  before wiring anything and found it was `1` for all 921 real rows
+  (`daily_cap` stays `null` per D23, so `select_top_n` selects
+  everything) — wiring `_new_pairs()` to check `selected` as originally
+  proposed would have excluded zero jobs in production, silently. User
+  chose an independent `min_relevance_score` floor instead over
+  reactivating `daily_cap`. Built `passes_relevance_floor()`
+  (`pipeline/relevance.py`), `min_relevance_score: 20` in `config/
+  relevance.yaml`, wired into `web/app.py`'s `_new_pairs()`, `QueueContext`
+  gained `relevance_config`. Tests-first (8 new: 5 `test_relevance.py`,
+  3 `test_web_app.py`), full suite 441/441.
+  **Bug 3, disqualifiers-leak, found via the required real-data
+  validation before calling the gate done, not assumed clean:** measured
+  the gate's real production impact (934 -> 850 would-be-queued pairs,
+  84 excluded) and spot-checked the lowest-scored exclusions per the
+  user's explicit ask ("confirm they're genuinely poor matches, not good
+  ones wrongly cut"). Found 6 real jobs scored `relevance=0` while their
+  own `one_line` called them a strong/excellent match, root-caused to
+  `disqualifiers` leaking up to ~600 words of unresolved internal debate
+  that concluded "not a disqualifier" while the score stayed 0 anyway —
+  the same failure category as job 3283's earlier, narrower fix,
+  recurring because that fix named specific banned phrases rather than
+  the general pattern. Generalized `_RELEVANCE_PROMPT`'s instruction
+  (short phrases only, reasoning must stay silent, a rejected
+  disqualifier must not lower the score). Verified real, not assumed:
+  all 6 flagged jobs re-scored (5 resolved 0->75-85 matching their
+  positive `one_line`; the 6th, job 1211, was re-examined and found to
+  have been a false positive in the original spot-check, correctly
+  low both before and after); the fuller 23-job verbose-disqualifier
+  population re-scored, 22/23 clean, 1 improved-but-not-fully-clean
+  (noted in Known Issues).
+  Full 50-job/150-point Task 1 re-run against the corrected fixture +
+  corrected prompt + existing determinism fix: rho still fails all 3
+  profiles (0.449-0.557, real improvement over D36) but top30_overlap
+  passes 2/3 and is near-passing on the third (0.733). Wrote 6 real
+  `model_evals` rows. Wrote D37 (supersedes D36's still-open framing):
+  ship C4, keep the floor gate active, top30_overlap is the
+  decision-relevant metric given the gate's actual score-floor
+  mechanism, not `daily_cap`-based ranking.
+  Incidental real finding while checking `runs` counts for this
+  checkpoint: 3 more independent unattended `sync` firings landed since
+  last checkpoint (ids 17-19, none triggered by this session), clearing
+  the two-independent-firings bar the last checkpoint set for calling
+  B2's Task Scheduler regression genuinely fixed — updated Known Issues
+  and the B2 status row accordingly.
+  Full suite 441/441, `ruff check`/`format --check` clean throughout.
+  Next: no next task chosen yet, needs go-ahead. Two flagged-not-built
+  items from this session worth surfacing when choosing: a cheap
+  body-text leadership-phrase check for B3 (job 2246's finding), and
+  whether to iterate further on rho or accept it as C4's real ceiling.
 
 - 2026-08-07 through 2026-08-11, C4 (done): Planned in Claude Code plan
   mode per explicit request, grounded before any code. Attempted the

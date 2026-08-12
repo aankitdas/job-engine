@@ -36,6 +36,7 @@ from jobengine.pipeline.filter import (
     matches_profiles,
     passes_all_filters,
 )
+from jobengine.pipeline.relevance import load_relevance_config, passes_relevance_floor
 from jobengine.profiles.config import load_profile_config
 from jobengine.queue import orchestrate
 from jobengine.resume.bank import load_bank
@@ -66,6 +67,7 @@ def _build_context() -> orchestrate.QueueContext:
         profile_configs=load_profile_config(),
         filter_config=load_filter_config(),
         llm_config=load_llm_config(),
+        relevance_config=load_relevance_config(),
     )
 
 
@@ -98,21 +100,30 @@ def _recent_open_jobs(conn) -> list[Job]:
 def _new_pairs(ctx: orchestrate.QueueContext) -> list[tuple[Job, str]]:
     """(job, profile) pairs that survive B3's full filter chain
     (passes_all_filters: title match, US location, seniority,
-    employment type, citizenship/clearance, already-applied) but have
-    never been triggered into a job_resume_variant at all -- the
-    "not yet reviewed" links on the list page. Gated per-job on
-    passes_all_filters() first; matches_profiles() is then called again
-    only for jobs that already cleared every other check, to get the
-    actual list of matched profiles to iterate (passes_all_filters()
-    itself only returns a bool, not which profiles matched)."""
+    employment type, citizenship/clearance, already-applied) AND C4's
+    relevance floor, but have never been triggered into a
+    job_resume_variant at all -- the "not yet reviewed" links on the
+    list page. Gated per-job on passes_all_filters() first;
+    matches_profiles() is then called again only for jobs that already
+    cleared every other check, to get the actual list of matched
+    profiles to iterate (passes_all_filters() itself only returns a
+    bool, not which profiles matched). passes_relevance_floor() is
+    per-(job, profile), so it runs inside that per-profile loop, after
+    matches_profiles() -- a job can clear the floor for one matched
+    profile and not another."""
     existing = list_existing_variant_pairs(ctx.conn)
     pairs = []
     for job in _recent_open_jobs(ctx.conn):
         if not passes_all_filters(ctx.conn, job, ctx.filter_config):
             continue
         for profile in matches_profiles(job, ctx.filter_config):
-            if (job.id, profile) not in existing:
-                pairs.append((job, profile))
+            if (job.id, profile) in existing:
+                continue
+            if not passes_relevance_floor(
+                ctx.conn, job.id, profile, ctx.relevance_config
+            ):
+                continue
+            pairs.append((job, profile))
     return pairs
 
 
