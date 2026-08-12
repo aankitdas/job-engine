@@ -237,6 +237,26 @@ citizenship_clearance:
     - "export control"
     - "us person"
 
+# Hard exclude, applied across ALL profiles, same shape as
+# citizenship_clearance above: a real people-management role can sit
+# under a nominally-IC title (job_id 2246, "Staff Software Engineer,
+# API Platform," whose body text says "You will lead a team of
+# engineers... 5+ years in a strategic technical leadership role") and
+# sail through seniority's title-only check undetected -- only C4's
+# LLM read caught that one (see D37 in docs/decisions.md). This is a
+# cheap, deterministic pre-catch for the clearest cases only, not a
+# replacement for C4's more nuanced read: concrete phrases naming real
+# people-management responsibility, never generic "leadership"
+# language a genuine IC role can use too (e.g. "demonstrates technical
+# leadership" describes influence-without-authority, not a
+# disqualifier, and must not match).
+leadership:
+  exclude_phrases:
+    - "lead a team of"
+    - "direct reports"
+    - "manage a team"
+    - "people management responsibilities"
+
 employment_type:
   # Ashby's raw_json has a structured `employmentType` field (real values seen
   # in data/jobengine.db: "FullTime"). Greenhouse has no such field at all, so

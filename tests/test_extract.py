@@ -29,6 +29,7 @@ from jobengine.pipeline.filter import (
     CitizenshipClearanceConfig,
     EmploymentTypeConfig,
     FilterConfig,
+    LeadershipConfig,
     LocationConfig,
     ProfileFilterConfig,
     SeniorityConfig,
@@ -99,6 +100,7 @@ def _single_profile_config(
         location=LocationConfig(remote_synonyms=[]),
         seniority=SeniorityConfig(exclude_title_keywords=[]),
         citizenship_clearance=CitizenshipClearanceConfig(exclude_phrases=[]),
+        leadership=LeadershipConfig(exclude_phrases=[]),
         employment_type=EmploymentTypeConfig(
             exclude_ashby_types=[], exclude_title_keywords=[]
         ),
@@ -114,6 +116,7 @@ def _two_profile_config() -> FilterConfig:
         location=LocationConfig(remote_synonyms=[]),
         seniority=SeniorityConfig(exclude_title_keywords=[]),
         citizenship_clearance=CitizenshipClearanceConfig(exclude_phrases=[]),
+        leadership=LeadershipConfig(exclude_phrases=[]),
         employment_type=EmploymentTypeConfig(
             exclude_ashby_types=[], exclude_title_keywords=[]
         ),
@@ -126,6 +129,7 @@ def _no_match_config() -> FilterConfig:
         location=LocationConfig(remote_synonyms=[]),
         seniority=SeniorityConfig(exclude_title_keywords=[]),
         citizenship_clearance=CitizenshipClearanceConfig(exclude_phrases=[]),
+        leadership=LeadershipConfig(exclude_phrases=[]),
         employment_type=EmploymentTypeConfig(
             exclude_ashby_types=[], exclude_title_keywords=[]
         ),

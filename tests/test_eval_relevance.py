@@ -26,6 +26,7 @@ from jobengine.pipeline.filter import (
     CitizenshipClearanceConfig,
     EmploymentTypeConfig,
     FilterConfig,
+    LeadershipConfig,
     LocationConfig,
     ProfileFilterConfig,
     SeniorityConfig,
@@ -72,6 +73,7 @@ def _filter_config() -> FilterConfig:
         location=LocationConfig(remote_synonyms=[]),
         seniority=SeniorityConfig(exclude_title_keywords=["manager"]),
         citizenship_clearance=CitizenshipClearanceConfig(exclude_phrases=[]),
+        leadership=LeadershipConfig(exclude_phrases=[]),
         employment_type=EmploymentTypeConfig(
             exclude_ashby_types=[], exclude_title_keywords=[]
         ),

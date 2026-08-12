@@ -17,6 +17,7 @@ from jobengine.pipeline.filter import (
     is_already_applied,
     is_citizenship_or_clearance_required,
     is_excluded_employment_type,
+    is_leadership_role_required,
     is_remote,
     is_us_location,
     load_filter_config,
@@ -299,6 +300,44 @@ def test_citizenship_clearance_eeoc_sponsorship_boilerplate_is_not_a_false_posit
     assert is_citizenship_or_clearance_required(description, config) is False
 
 
+# --- leadership hard exclude, all profiles (D37) ---
+
+
+def test_leadership_excludes_job_2246_exact_phrase(config):
+    # job_id 2246 (Stripe, "Staff Software Engineer, API Platform"): a
+    # real Technical Lead role under a nominally-IC title, the exact
+    # finding that motivated this check.
+    description = (
+        "Responsibilities: Lead a team of talented engineers, providing "
+        "mentorship, guidance, and support to ensure their success."
+    )
+    assert is_leadership_role_required(description, config) is True
+
+
+def test_leadership_does_not_exclude_generic_technical_leadership_language(config):
+    # Genuine IC roles legitimately use "technical leadership" to mean
+    # influence-without-authority, not people management -- this must
+    # not match.
+    description = (
+        "You will demonstrate technical leadership across the team, "
+        "driving architecture decisions and mentoring through code review."
+    )
+    assert is_leadership_role_required(description, config) is False
+
+
+def test_leadership_normal_jd_not_excluded(config):
+    description = (
+        "We are looking for a Software Engineer to join our backend team. "
+        "You will build and ship APIs used by millions of users."
+    )
+    assert is_leadership_role_required(description, config) is False
+
+
+def test_leadership_excludes_direct_reports_phrase(config):
+    description = "This role will have 3-5 direct reports within its first year."
+    assert is_leadership_role_required(description, config) is True
+
+
 # --- second round of exclusion_keywords, from the visual sample check ---
 
 
@@ -475,6 +514,11 @@ def test_passes_all_filters_false_when_citizenship_or_clearance_required(
     conn, config
 ):
     job = _job(description="Must be a US citizen due to federal contract work.")
+    assert passes_all_filters(conn, job, config) is False
+
+
+def test_passes_all_filters_false_when_leadership_role_required(conn, config):
+    job = _job(description="You will lead a team of engineers across two orgs.")
     assert passes_all_filters(conn, job, config) is False
 
 

@@ -36,6 +36,10 @@ class CitizenshipClearanceConfig(BaseModel):
     exclude_phrases: list[str]
 
 
+class LeadershipConfig(BaseModel):
+    exclude_phrases: list[str]
+
+
 class SeniorityConfig(BaseModel):
     exclude_title_keywords: list[str]
 
@@ -50,6 +54,7 @@ class FilterConfig(BaseModel):
     location: LocationConfig
     seniority: SeniorityConfig
     citizenship_clearance: CitizenshipClearanceConfig
+    leadership: LeadershipConfig
     employment_type: EmploymentTypeConfig
     daily_cap: int | None = None
 
@@ -178,6 +183,25 @@ def is_citizenship_or_clearance_required(
     )
 
 
+def is_leadership_role_required(
+    description: str | None, config: FilterConfig
+) -> bool:
+    """Same shape as is_citizenship_or_clearance_required: a cheap,
+    deterministic pre-catch for the clearest people-management cases
+    only (job_id 2246, D37 in docs/decisions.md -- a real Technical
+    Lead role under a nominally-IC title that B3's title-only seniority
+    check let through, caught only by C4's LLM read). Deliberately
+    narrow, concrete phrases naming real management responsibility, not
+    generic "leadership" language a genuine IC role can also use."""
+    if not description:
+        return False
+    description_lower = description.lower()
+    return any(
+        phrase_matches(phrase, description_lower)
+        for phrase in config.leadership.exclude_phrases
+    )
+
+
 def is_above_target_seniority(title: str, config: FilterConfig) -> bool:
     title_lower = title.lower()
     return any(
@@ -236,10 +260,11 @@ def passes_all_filters(
 ) -> bool:
     """B3's full deterministic chain in one call: matches at least one
     profile AND clears every exclusion check (location, seniority,
-    employment type, citizenship/clearance, already-applied). Every
-    individual check above has always been callable on its own; this is
-    the first place anything needed "does this job actually survive B3
-    end to end," not just one check in isolation. First real caller:
+    employment type, citizenship/clearance, leadership-role, already-
+    applied). Every individual check above has always been callable on
+    its own; this is the first place anything needed "does this job
+    actually survive B3 end to end," not just one check in isolation.
+    First real caller:
     F1's queue-listing logic (src/jobengine/web/app.py), which previously
     only reapplied the title check via matches_profiles() alone."""
     if not matches_profiles(job, config):
@@ -251,5 +276,7 @@ def passes_all_filters(
     if is_excluded_employment_type(job, config):
         return False
     if is_citizenship_or_clearance_required(job.description, config):
+        return False
+    if is_leadership_role_required(job.description, config):
         return False
     return not is_already_applied(conn, job.id)
