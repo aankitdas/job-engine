@@ -280,6 +280,42 @@ def get_job_analysis(
     return JobAnalysis(**dict(row))
 
 
+def has_job_analysis(conn: sqlite3.Connection, job_id: int) -> bool:
+    """Any profile's row counts: analyze_job() (C3) makes one LLM call
+    per job and fans it out to every matched profile in that same call,
+    so "any row exists" already means "this job's extraction is done,"
+    not just done for one profile."""
+    row = conn.execute(
+        "SELECT 1 FROM job_analysis WHERE job_id = ? LIMIT 1", (job_id,)
+    ).fetchone()
+    return row is not None
+
+
+def list_unscored_open_jobs(conn: sqlite3.Connection, window_days: int) -> list[Job]:
+    """Open jobs (closed_at IS NULL) first seen within window_days with
+    no relevance_scores row for any profile yet -- the incremental
+    candidate set pipeline/batch.py's daily orchestrator scans, so a job
+    already scored by a prior run is never re-sent to the LLM by a later
+    one. Relies on score_job()'s own atomic per-call fan-out (every
+    currently matched profile is scored in one call, never partially)
+    for "has any row" to also mean "has every row it should." Ordered by
+    (first_seen_at, id) for deterministic batch processing order, not
+    SQLite's unspecified default."""
+    rows = conn.execute(
+        """
+        SELECT * FROM jobs j
+        WHERE j.closed_at IS NULL
+        AND j.first_seen_at >= datetime('now', ?)
+        AND NOT EXISTS (
+            SELECT 1 FROM relevance_scores r WHERE r.job_id = j.id
+        )
+        ORDER BY j.first_seen_at, j.id
+        """,
+        (f"-{window_days} days",),
+    ).fetchall()
+    return [Job(**dict(row)) for row in rows]
+
+
 def get_company(conn: sqlite3.Connection, slug: str, ats: str) -> Company | None:
     row = conn.execute(
         "SELECT * FROM companies WHERE slug = ? AND ats = ?",

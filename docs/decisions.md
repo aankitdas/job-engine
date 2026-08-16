@@ -1592,3 +1592,98 @@ narrower defect than a full model swap). 6 real rows written to
 `model_evals` (`spearman_rho_<profile>`, `top30_overlap_<profile>`,
 `fixture_version` = the corrected fixture's real hash). Full suite
 441/441, `ruff check`/`format --check` clean.
+
+---
+
+**D38. F1's review queue had no batch orchestrator (D35's deliberate
+scope cut) and, separately, its relevance floor (D37) was failing open
+on every job B2 ever synced, since nothing scheduled C4 to actually
+score them.** A live investigation this session (queried against the
+real `data/jobengine.db`, not estimated) confirmed
+`passes_relevance_floor()` fails open by design on an unscored
+`(job, profile)` -- correct behavior for what it was built for, but it
+meant the floor gate had never actually filtered anything for any job
+synced since C4's last manual scoring run, silently. Real counts at
+investigation time: 520 open jobs in F1's own 7-day queue window with
+zero `relevance_scores` row, 84 of those surviving B3's full filter
+chain (`passes_all_filters()`), 93 real (job, profile) pairs C4 would
+need to score (9 jobs match 2 profiles), 84 real C3 extraction calls
+(one per surviving job, extraction is job-level not profile-level).
+D35's own text names exactly this precondition -- "building the real
+scheduled version properly would need C4... first" -- which is now
+done (D36/D37), so this was the right time, not a new decision to defer
+again.
+
+**Scope, confirmed by asking:** one new module,
+`src/jobengine/pipeline/batch.py` (`run_daily_batch()`), run once daily
+on its own Task Scheduler entry (`scripts/relevance_batch.sh`), not
+chained onto `sync.sh`'s every-3h cadence -- matches
+`docs/architecture.md`'s own pipeline table, which puts stages 2.5
+(relevance) and 3 (extraction) at `daily`, one tier down from fetch/
+filter's `2x daily`. Runs C4 (`score_job()`) for every job in
+`list_unscored_open_jobs()`'s incremental candidate set (new
+`db/models.py` accessor: open, within `WINDOW_DAYS`, zero
+`relevance_scores` row for any profile), then runs C3 (`analyze_job()`)
+only for jobs where at least one scored profile clears
+`min_relevance_score` -- not every B3 survivor unconditionally, which
+was the literal scope first proposed. Deliberately does not call
+`queue/orchestrate.py`'s `ensure_reviewed()` or the patch ladder
+(D3/D4): rendering a candidate resume stays F1's lazy per-click
+trigger, unchanged, per that module's own docstring.
+
+**A real bug in the existing tooling was found and designed around, not
+inherited.** `pipeline/relevance.py`'s `score` CLI (`_cmd_score`) has no
+"already scored" check -- `freshness_window_days` is deliberately `null`
+(D23), so every invocation rescans and re-scores the *entire* open
+`jobs` table. Scheduling that CLI directly would have re-called the LLM
+for the whole open backlog (3,070+ jobs and growing) on every single
+run, forever -- the opposite of "only newly-synced jobs each run."
+`list_unscored_open_jobs()`'s `NOT EXISTS (relevance_scores)` clause is
+the fix; the CLI itself is left unchanged, still useful as a deliberate
+manual/one-off tool (e.g. a full re-score after a prompt change), just
+no longer what the scheduler calls. The same incremental principle was
+extended to extraction: a new `has_job_analysis()` accessor skips
+`analyze_job()` for a job already analyzed by any path (including F1's
+own lazy trigger reaching it first via a direct URL visit), so the two
+stages can never regress into rescanning their full backlogs either.
+
+**Cost/coverage tradeoff, recorded rather than silently accepted:**
+gating C3 on C4's floor (instead of running it for every B3 survivor)
+means `keyword_corpus` -- the accumulating per-profile keyword table
+M1's monthly base-resume regeneration reads to detect corpus drift --
+never sees keywords from a below-floor job's JD, even though that JD
+was real, fetched, and B3-eligible. This is a deliberate cost
+optimization (avoids real, wasted LLM calls on jobs nothing in F1 will
+ever surface to a reviewer, since `passes_relevance_floor()` already
+hides them from the queue list), not a correctness bug, but it does
+mean `keyword_corpus`'s coverage is now bounded by C4's floor, not by
+B3's filters alone -- a real, if minor, second-order effect of D37's
+floor gate that hadn't been traced through to the corpus before this
+session. Revisit only if a future monthly corpus review (M1) shows
+real drift or gaps traceable to this narrowing; not pre-emptively
+widened without that evidence, same D27-style precedent.
+
+**Grounded with a real, live-queried backlog estimate, not a guess.**
+At C1's measured steady-state latency (600-935ms/call after the known
+one-time ~15s Ollama cold start), the first catch-up run against the
+520/84/93/84 numbers above was estimated at under 3 minutes wall-clock
+total; ongoing incremental cost was estimated from real recent unattended
+sync firings (`runs` id 17-19: `new` counts of 2, 88, 4 per 3h cycle) at
+a small handful of calls per cycle once caught up, confirmed by
+`list_unscored_open_jobs()`'s incremental design rather than re-measured
+against a real scheduled firing (none exists yet at the time of this
+entry -- Task Scheduler registration is a manual step outside this
+session's own file changes, same as B2's original `sync.sh` rollout).
+
+12 new tests (`tests/test_batch.py`), written before implementation per
+hard rule 7: the incremental candidate query (already-scored/closed/
+outside-window jobs all excluded), the floor-gating of C3 (a
+below-floor job gets no `job_analysis` row), extraction's job-level-not-
+profile-level call count (one call serving two matched profiles), an
+explicit already-scored-job-is-not-rescored regression test (the core
+incremental guarantee this whole module exists to provide), an
+already-analyzed-job-is-not-reextracted counterpart, a `runs`-row
+assertion, and a regression test pinning `web/app.py`'s
+`_LIST_WINDOW_DAYS` to the same `WINDOW_DAYS` constant `batch.py` now
+owns, so the two can't silently drift apart again. Full suite 458/458
+(up from 441), `ruff check`/`format --check` clean.

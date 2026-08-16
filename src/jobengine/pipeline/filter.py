@@ -183,9 +183,7 @@ def is_citizenship_or_clearance_required(
     )
 
 
-def is_leadership_role_required(
-    description: str | None, config: FilterConfig
-) -> bool:
+def is_leadership_role_required(description: str | None, config: FilterConfig) -> bool:
     """Same shape as is_citizenship_or_clearance_required: a cheap,
     deterministic pre-catch for the clearest people-management cases
     only (job_id 2246, D37 in docs/decisions.md -- a real Technical

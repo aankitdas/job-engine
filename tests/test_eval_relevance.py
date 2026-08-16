@@ -93,7 +93,9 @@ def _bank() -> Bank:
         end="2023-01",
         kind="full_time",
         title={"default": "Engineer"},
-        summary=SummaryBullet(id="s1", text="Built systems.", keywords=[], status="verified"),
+        summary=SummaryBullet(
+            id="s1", text="Built systems.", keywords=[], status="verified"
+        ),
         bullets=[
             Bullet(
                 id="b1",
@@ -214,7 +216,11 @@ def test_run_calls_score_relevance_once_per_labeled_job_profile_pair(conn):
 
     _run(
         task1.run(
-            conn, _filter_config(), _relevance_config(), _llm_config(), _bank(),
+            conn,
+            _filter_config(),
+            _relevance_config(),
+            _llm_config(),
+            _bank(),
             local_client=client,
         )
     )
@@ -229,7 +235,11 @@ def test_run_produces_a_result_per_labeled_profile(conn):
 
     result = _run(
         task1.run(
-            conn, _filter_config(), _relevance_config(), _llm_config(), _bank(),
+            conn,
+            _filter_config(),
+            _relevance_config(),
+            _llm_config(),
+            _bank(),
             local_client=client,
         )
     )
@@ -247,7 +257,11 @@ def test_run_schema_failure_does_not_abort_remaining_jobs(conn):
 
     result = _run(
         task1.run(
-            conn, _filter_config(), _relevance_config(), _llm_config(), _bank(),
+            conn,
+            _filter_config(),
+            _relevance_config(),
+            _llm_config(),
+            _bank(),
             local_client=client,
         )
     )
@@ -317,7 +331,9 @@ def test_task1_passed_false_when_one_profile_misses_either_bar():
 
 
 def test_print_task1_report_shows_per_profile_numbers(capsys):
-    r = task1.Task1Report(by_profile=[_result("ai_ml_engineer", n=50, rho=0.72, overlap=0.80)])
+    r = task1.Task1Report(
+        by_profile=[_result("ai_ml_engineer", n=50, rho=0.72, overlap=0.80)]
+    )
     report.print_task1_report(r)
     out = capsys.readouterr().out
     assert "ai_ml_engineer" in out

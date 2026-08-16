@@ -510,9 +510,7 @@ def test_passes_all_filters_false_when_excluded_employment_type(conn, config):
     assert passes_all_filters(conn, job, config) is False
 
 
-def test_passes_all_filters_false_when_citizenship_or_clearance_required(
-    conn, config
-):
+def test_passes_all_filters_false_when_citizenship_or_clearance_required(conn, config):
     job = _job(description="Must be a US citizen due to federal contract work.")
     assert passes_all_filters(conn, job, config) is False
 

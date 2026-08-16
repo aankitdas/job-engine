@@ -67,7 +67,11 @@ def _seed_company(conn, *, slug="acme", ats="greenhouse"):
 
 
 def _seed_job(
-    conn, *, ats_job_id="1", title="Software Engineer", description="Requirements:\n- Go\n"
+    conn,
+    *,
+    ats_job_id="1",
+    title="Software Engineer",
+    description="Requirements:\n- Go\n",
 ) -> int:
     _seed_company(conn)
     return upsert_job(
@@ -203,7 +207,9 @@ def test_ensure_reviewed_triggers_extraction_and_persists_variant(conn):
     _seed_base_resume(conn)
     client = _FakeClient(_EXTRACT_PAYLOAD)
 
-    variant = orchestrate.ensure_reviewed(_ctx(conn, client), job_id, "software_engineer")
+    variant = orchestrate.ensure_reviewed(
+        _ctx(conn, client), job_id, "software_engineer"
+    )
 
     assert variant.job_id == job_id
     assert variant.review_status == "pending"
@@ -217,7 +223,9 @@ def test_ensure_reviewed_persists_deficits_to_rubric_results(conn):
     _seed_base_resume(conn)
     client = _FakeClient(_EXTRACT_PAYLOAD)
 
-    variant = orchestrate.ensure_reviewed(_ctx(conn, client), job_id, "software_engineer")
+    variant = orchestrate.ensure_reviewed(
+        _ctx(conn, client), job_id, "software_engineer"
+    )
 
     results = get_rubric_results(conn, variant.id)
     assert any(r.rule_id == "R001" and r.passed is False for r in results)
@@ -227,7 +235,9 @@ def test_ensure_reviewed_second_call_is_idempotent_and_makes_no_new_calls(conn):
     job_id = _seed_job(conn)
     _seed_base_resume(conn)
     first_client = _FakeClient(_EXTRACT_PAYLOAD)
-    first = orchestrate.ensure_reviewed(_ctx(conn, first_client), job_id, "software_engineer")
+    first = orchestrate.ensure_reviewed(
+        _ctx(conn, first_client), job_id, "software_engineer"
+    )
 
     second_client = _FakeClient(_EXTRACT_PAYLOAD)
     second = orchestrate.ensure_reviewed(

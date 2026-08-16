@@ -277,7 +277,11 @@ def test_get_job_analysis_reads_back_a_written_row(conn):
     job_id = _seed_job(conn)
     job = Job(id=job_id, **_job_kwargs())
     client = _FakeClient(_PAYLOAD)
-    _run(analyze_job(conn, job, _two_profile_config(), _llm_config(), local_client=client))
+    _run(
+        analyze_job(
+            conn, job, _two_profile_config(), _llm_config(), local_client=client
+        )
+    )
 
     analysis = get_job_analysis(conn, job_id, "ai_ml_engineer")
     assert analysis is not None

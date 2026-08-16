@@ -31,6 +31,7 @@ from jobengine.db.models import (
     list_existing_variant_pairs,
 )
 from jobengine.llm.router import load_config as load_llm_config
+from jobengine.pipeline.batch import WINDOW_DAYS as _LIST_WINDOW_DAYS
 from jobengine.pipeline.filter import (
     load_filter_config,
     matches_profiles,
@@ -47,8 +48,11 @@ templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
 
 # How far back GET / looks for newly-matched-but-not-yet-triggered
 # pairs. Matches B3's own "300-500 survivors/day" framing rather than
-# scanning the whole historical jobs table on every page load.
-_LIST_WINDOW_DAYS = 7
+# scanning the whole historical jobs table on every page load. Imported
+# from pipeline/batch.py (aliased to this module's original name) so the
+# daily batch orchestrator scans the exact same window this page reads,
+# not two independently-hardcoded copies of "7" -- see D38 in
+# docs/decisions.md.
 
 app = FastAPI(title="job-engine review queue")
 
