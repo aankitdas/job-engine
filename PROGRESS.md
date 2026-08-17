@@ -3,115 +3,69 @@
 **Claude Code: read this file at the start of every session and update it at
 the end via `/checkpoint`. Do not rely on memory of previous sessions.**
 
-Last updated: 2026-08-16
-Current task: **G1 (form schema fetch + autonomy gating, no browser)
-ships with a real classification bug fixed after a real 40-job live run,
-not shipped on first-pass synthetic confidence alone (D39).** The first
-cut of `classify_autonomy_ceiling()` only capped a job's autonomy
-ceiling on a required *free-text* field. A live run against 40 real,
-open, score>=20 Greenhouse jobs found this silently let 21/40 jobs
-through at ceiling 2, but 20 of those 21 had required
-`multi_value_single_select` attestations (Airbnb's "Candidate AI Usage
-Attestation," "Airbnb Candidate Privacy Policy," non-compete
-acknowledgments) the system has no way to answer — invisible to a
-free-text-only check since they're selects, not text. Only job 2650
-(Anthropic) genuinely had zero unmapped required fields. Rule inverted:
-ceiling 2 now requires *every* required field to be a Greenhouse
-standard identity field or explicitly listed in `config/apply.yaml`'s
-`mapped_question_labels` (renamed from `safe_optional_question_labels`,
-whose old comment claiming "today's data doesn't need this list" was
-also disproved live — Airbnb job 7995153 has "How did you hear about
-this job?" as `input_text`, `required=True`). Eligibility questions
-("legally authorized to work," "require sponsorship," relocation) were
-deliberately held out of the mapped list even though they recur across
-real forms and are philosophically identity.toml-answerable per D16:
-G1 has no identity.toml lookup logic yet (fetch+classify only), and
-mapping the label without that logic would silently promote a ceiling
-on a question nothing actually answers — confirmed via `AskUserQuestion`,
-revisit once a future session (G2 territory) builds the real mapping.
-`classify_autonomy_ceiling()` also now returns the unmapped required
-fields alongside the ceiling (`AutonomyClassification`, not a bare int)
-so a future G2 knows exactly what a human must fill.
-**Two more real field-modeling bugs, same investigation:** (1)
-Greenhouse represents "provide ONE of these" (Resume/CV: file upload OR
-pasted text) as multiple `fields` under one question sharing one
-`required` flag — confirmed live on job 4466, `resume`/`resume_text`
-both `required=True`. The flat per-field check would have wrongly
-capped a job whose *other* alternative was actually sufficient; fixed
-by grouping required fields by label before classifying (free,
-structurally-correct grouping already present in Greenhouse's real
-JSON, not a heuristic). (2) `cover_letter`/`cover_letter_text` were
-wrongly in `_STANDARD_FIELD_NAMES` — a required cover letter needs
-genuinely generated prose, the same fabrication-risk category as a
-free-text essay (D18), so it must never silently pass as "standard" the
-way résumé does (résumé stays standard: this pipeline already
-deterministically produces that exact file, D3/D4; cover letter has no
-equivalent source anywhere in this codebase). Latent in the 40-job
-sample (0/40 required one) but real — confirmed on job 7995153, which
-does require one. All three grounding jobs re-verified live post-fix
-via the real CLI (`python -m jobengine.apply.form_schema {2650,4466,410}`):
-2650 -> ceiling 2, empty unmapped list; 4466 -> ceiling 1, the 6 real
-unmapped Airbnb attestation/eligibility labels; 410 (7995153) -> ceiling
-1, "Cover Letter" now correctly appears in the unmapped list and "How
-did you hear" correctly does not. 3 new + 9 rewritten tests in
-`test_form_schema.py` (12 total), all built on real captured Greenhouse
-response shapes (Discord, both Airbnb jobs), not synthetic minimal
-fixtures — `classify_autonomy_ceiling()`'s whole rule depends on
-Greenhouse's real field-naming convention, so a synthetic fixture
-wouldn't actually exercise it. See D39 in docs/decisions.md for the
-complete writeup, including the live-verified Ashby-gap finding this
-prompted: **393 of 951 distinct scored jobs (41.3%; 362/861, 42.0%
-open-only) are `ats='ashby'`**, which G1 cannot classify at all (job
-3902's real `401 Unauthorized` on the one plausible endpoint, no
-schema embedded in Ashby's SPA apply page either) — this falsifies
-D16's literal "both APIs expose a schema pre-browser" claim, not just a
-scope note.
+Last updated: 2026-08-17
+Current task: **D40 (B3's seniority filter now excludes Staff/Senior
+Staff/Principal/Distinguished bands), live-verified against the real db
+and committed.** C4 scores title/skill match, not seniority band, so
+Staff+ roles (scoring 95-100 on skill fit alone) were dominating the top
+of the queue above a current graduate student's actual target level --
+caught via a real 40-job spot-check of the highest-scored live
+Greenhouse jobs (all scoring 95-100, almost entirely Staff/Senior
+Staff/Principal-tier). `config/filters.yaml`'s `seniority.
+exclude_title_keywords` gained `staff`/`principal`/`distinguished`,
+grounded against all 861 open+scored jobs at investigation time (181
+"staff" titles hand-reviewed individually, line by line, not sampled --
+zero false positives found outside "Member of Technical Staff").
+Anthropic/OpenAI's "Member of Technical Staff" is a flat, band-agnostic
+title spanning entry-level through senior, so `SeniorityConfig` gained
+`exclude_override_keywords` (same exclude/override shape
+`software_engineer`'s "forward deployed" exception already uses, not a
+new pattern) -- but a real, already-existing "Senior/Lead Member of
+Technical Staff" title carries genuine band information the bare form
+doesn't, so a third list, `exclude_override_exceptions`, keeps those
+excluded rather than silently riding the broad override once they get
+scored (0 blast radius today, 5 real unscored titles already sitting in
+that exact gap, caught before shipping rather than after a future
+`daily_batch` run scored them). `is_above_target_seniority()` is now a
+three-tier check (exclude -> override -> exception to the override),
+reusing `phrase_matches()` throughout, no new matching primitive.
+**Live-verified against the real, current db at this checkpoint** (not
+carried forward from D40's own investigation numbers, which used a
+since-changed 861 denominator as jobs closed between planning and
+implementation): **190 of 838 open+scored jobs excluded on seniority
+alone (22.7%), 637/838 survive every B3 filter combined**, top-20 by
+relevance score spread across 10 distinct companies (Pinterest 4, Figma
+3, Brex 3, Discord/Ramp/DoorDash 2 each, Stripe/OpenAI/Airbnb/Robinhood
+1 each) -- titles overwhelmingly plain `Software Engineer`/`Senior
+Software Engineer`/`Data Scientist`, the filter producing the intended
+shape rather than a thin or single-company-dominated list. 7 new tests
+in `test_filter.py`, one existing test deliberately reversed
+(`test_seniority_does_not_exclude_staff_ai_engineer` removed -- staff is
+now excluded by design). Full suite 477/477 (up from 471), `ruff check`/
+`format --check` clean. See D40 in docs/decisions.md for the complete
+real-data writeup.
 
-**Also this session, before G1: F1's review queue gained a real daily
-batch orchestrator (D38), the gap D35 explicitly deferred until C4
-existed.** `passes_relevance_floor()` (D37) was failing open on every
-job synced since C4's last manual run — real, live-queried backlog at
-investigation time: 520 open jobs in F1's 7-day window with zero
-`relevance_scores` row, 84 of those real B3 survivors. New
-`src/jobengine/pipeline/batch.py` (`run_daily_batch()`) runs C4 for
-every job in a new incremental candidate query
-(`db/models.py`'s `list_unscored_open_jobs()` — `NOT EXISTS
-relevance_scores`, so a job already scored is never re-sent to the LLM
-by a later run, unlike `relevance.py`'s own `score` CLI which rescans
-the entire open backlog every invocation by design), then runs C3
-(`analyze_job()`) only for jobs where at least one scored profile
-clears the floor (`has_job_analysis()` guards against re-extracting).
-New `scripts/relevance_batch.sh` (once daily, not chained onto
-`sync.sh`'s 3h cadence, matching `docs/architecture.md`'s own stage
-cadence table). **Ran for real against the real backlog before
-scheduling anything unattended, per explicit request:** first catch-up
-run took 13m28s for 158 real LLM calls (93 relevance + 65 extraction),
-zero errors, `runs` id 23 confirms the exact counts
-(`candidates=520 relevance_pairs=93 floor_clearing_jobs=65
-extraction_jobs=65`) — real per-call latency (~5.1s/call) ran ~4-5x
-higher than the `llm.check` reference figure (600-935ms), since real
-relevance/extraction calls carry a full JD + profile card, not a small
-test prompt; projected steady-state cost from real sync `new`-count
-history (108 new jobs/day, span-normalized) is ~33 calls/day, ~3
-minutes, not 13. A pre-existing, unrelated test fragility surfaced
-along the way (3 `test_web_app.py` tests hardcoded a `first_seen_at`
-literal that aged out of the 7-day window as real session time passed)
-and was fixed (`_seed_job`'s default is now relative to `now`, not a
-fixed date). A small, real F1 gap was also closed: `queue_detail.html`
-embedded the rendered PDF inline but never linked the `.docx`, even
-though the file exists and the `/resume` static mount already serves
-it — one-line fix, `_resume_static_url()` reused for both paths.
-Full suite 471/471 (up from 441 at last checkpoint), `ruff check`/
-`format --check` clean.
+**Also corrected this checkpoint, retroactively: B3's
+`is_leadership_role_required()` (commit 9b37c71, 2026-08-12) shipped and
+was never reflected in this file.** It closed the C4-follow-up session's
+own flagged gap (job 2246: a Staff SWE title carrying genuine
+people-management body text that a title-only check couldn't catch) --
+same `phrase_matches()` shape as `is_citizenship_or_clearance_required`,
+concrete body-text phrases only ("lead a team of", "direct reports",
+"manage a team", "people management responsibilities"), wired into
+`passes_all_filters()`. Both the "What exists" pipeline/ entry and the
+Known Issues entry that used to describe this as "flagged only, not
+built" were stale from the moment that commit landed through both the
+G1 and this checkpoint; corrected below rather than left silently wrong.
+
 Next: no next task chosen yet, needs your go-ahead per the session
-protocol. G2 (Playwright filler, dry-run only) is the natural next
-Phase G step, but needs its own design pass (identity.toml lookups for
-the held-out eligibility questions, actual form-filling). Other open
-candidates per TODO.md, none started: A4c (watermarking),
-B1-followup/B3-followup (deliberately deferred), F2 (metrics dashboard),
-F3 (Telegram notifier). P4 (accept and log to gap_ledger) also remains
-deliberately unbuilt. **Nothing from this session is committed to git
-yet** — confirmed explicitly, this checkpoint updates docs only.
+protocol. Same open candidates as last checkpoint: G2 (Playwright
+dry-run, needs its own identity.toml-lookup design pass), B3-followup
+(daily-cap calibration -- now has a materially different, D40-narrowed
+population to calibrate against than when D23 originally deferred it),
+F2 (metrics dashboard), F3 (Telegram notifier), P4 (accept + log to
+gap_ledger). This session's D40 work is committed and pushed as of this
+checkpoint.
 
 Separately: **B2's Task Scheduler regression is now confirmed fixed, not
 just a positive sign.** Last checkpoint had one real unattended firing
@@ -149,7 +103,7 @@ project's own B1/B2 sessions) treated that file.
 | B1 | ATS clients + registry | done | clients+registry only, sync.py's fetch/diff loop is B2 |
 | B2 | Fetch and diff | done | scheduled, confirmed firing 2026-08-03, regressed 08-04 through 08-07 (silent failures), recovered 08-11 (`runs` id 16) and confirmed fixed by 3 more independent unattended firings through 08-12 (`runs` id 17-19) |
 | B1-followup | Sponsorship-aware company vetting (DOL LCA) | not started | flagged only, not scoped, see TODO.md |
-| B3 | Filters + routing | done | signed off 2026-08-03; `filter.py` implemented, 40/40 tests pass, final numbers 859/3836 survivors (68/776/81 per profile) |
+| B3 | Filters + routing | done | signed off 2026-08-03; `filter.py` implemented, 58/58 tests pass; `is_leadership_role_required()` body-text catch added 2026-08-12 (9b37c71); D40 (2026-08-17) added staff/principal/distinguished seniority exclusion with an MTS override + Senior/Lead exceptions; live-verified current numbers: 190/838 open+scored excluded on seniority alone (22.7%), 637/838 survive every B3 filter combined |
 | B3-followup | Calibrate daily filter-survivor cap | not started | deliberately deferred, see D23 in docs/decisions.md |
 | C1 | LLM router | done | `llm.check` verified live against real Ollama, all 3 stages reachable, exit 0; cold-start ~15s / steady-state 600-935ms, see Known Issues |
 | C2 | Eval fixtures | done | 50/50 JDs labelled, loaded into `human_labels` (150 rows); 11/15 keyword-annotated, short of TODO.md's literal target, done anyway per explicit sign-off, see Known Issues |
@@ -282,14 +236,24 @@ Tests: `test_sources.py` 20, `test_sync.py` 10.
 **pipeline/** (`src/jobengine/pipeline/`): `filter.py`
 (`load_filter_config()`, `matches_profiles()`, `is_remote()`,
 `is_excluded_employment_type()`, `is_already_applied()`,
-`is_citizenship_or_clearance_required()`, `is_above_target_seniority()`,
-`is_us_location()`/`classify_location()`, `passes_all_filters()` (the
-full B3 chain in one call), `phrase_matches()` (promoted public this
-session, C4, for reuse by `relevance.py`'s disqualifier-blocklist
-matching); pure functions, nothing persisted). `config/filters.yaml`:
-all 5 hard/per-profile checks configured, `daily_cap: null` (deliberate,
-see D23; still zero real consumers as of this session — `relevance.py`
-reads it, but it's still `null`). `extract.py` (`ExtractionSchema`,
+`is_citizenship_or_clearance_required()`, `is_leadership_role_required()`
+(2026-08-12, 9b37c71: body-text catch for a title that reads as IC but
+whose JD requires people management, same `phrase_matches()` shape as
+the citizenship check, `LeadershipConfig.exclude_phrases`),
+`is_above_target_seniority()` (2026-08-17, D40: now a three-tier
+exclude/override/override-exception check via `SeniorityConfig.
+exclude_title_keywords`/`exclude_override_keywords`/
+`exclude_override_exceptions`, staff/principal/distinguished bands
+excluded with an explicit "Member of Technical Staff" carve-out and a
+Senior/Lead-qualified carve-out of that carve-out; see D40 in
+docs/decisions.md), `is_us_location()`/`classify_location()`,
+`passes_all_filters()` (the full B3 chain in one call, now also gating
+on `is_leadership_role_required()`), `phrase_matches()` (promoted public
+in C4, reused by `relevance.py`'s disqualifier-blocklist matching and by
+every new D40 check); pure functions, nothing persisted). `config/
+filters.yaml`: all hard/per-profile checks configured, `daily_cap: null`
+(deliberate, see D23; `relevance.py` reads it, but it's still `null`).
+`extract.py` (`ExtractionSchema`,
 `is_good_quality_jd()`, `extract_keywords()`, `analyze_job()`). New this
 session, C4: `relevance.py` — `RelevanceSchema`, `RelevanceConfig` +
 `load_relevance_config()`, `ProfileCard`/`build_profile_card()`/
@@ -319,8 +283,9 @@ floor, not a calibrated number). New this checkpoint: `batch.py`
 (`run_daily_batch()`, D38) — the daily C4/C3 orchestrator, `WINDOW_DAYS`
 (imported by `web/app.py` as `_LIST_WINDOW_DAYS`, single source of
 truth for both), CLI (`python -m jobengine.pipeline.batch`). Tests:
-`test_filter.py` 47, `test_extract.py` 14, `test_relevance.py` 36,
-`test_batch.py` 12 (new this checkpoint).
+`test_filter.py` 58 (up from 47: +5 leadership-role tests 2026-08-12,
++7/-1 D40 seniority tests 2026-08-17), `test_extract.py` 14,
+`test_relevance.py` 36, `test_batch.py` 12.
 
 **llm/** (`src/jobengine/llm/`): `schemas.py`, `providers/local.py`
 (`LocalProvider`, `think=False` pinned on every call), `providers/
@@ -502,23 +467,26 @@ pre-existing `RUF059`-adjacent formatting-only diffs in
 untouched by this session's own `git diff --stat` on those files).
 
 **`data/jobengine.db` real accumulated state, verified this
-checkpoint:** 15 companies (unchanged), 4505 jobs (up from 4362 — real
-unattended `sync` firings across the elapsed days between checkpoints,
-`runs` id 24-29), 30 `runs` rows total (25 `sync`, 3 `relevance` [the
-manual CLI, not this session's `daily_batch`], 2 `daily_batch` — ids 23
-and 30, D38; cadence between them doesn't yet show clear evidence of
-unattended Task Scheduler firing, both may have been manually invoked,
-not confirmed either way this checkpoint), `relevance_scores` 1029
-rows/951 distinct jobs (up from 921/854 — real growth from both
-`daily_batch` firings), `job_analysis` 90 rows/79 distinct jobs (up from
-1/1), `keyword_corpus` 219 rows (up from 7), `job_resume_variants` 1/
-`rubric_results` 1 (unchanged — still only job 3871's worked example,
-`applications` still 0 real approvals exist), 4 `base_resumes` rows
-(unchanged). `daily_cap` is still `null`; `min_relevance_score: 20`
-(D37) remains the only live gate on `web/app.py`'s `_new_pairs()`. Of
-the 951 distinct scored jobs, 393 (41.3%) are `ats='ashby'` — G1 (D39)
-cannot classify any of them, a real, live-verified gap, not a
-theoretical one.
+checkpoint:** 15 companies (unchanged), 4682 jobs (up from 4505 — 3 more
+real `sync` firings, `runs` id 31-33, none triggered by this session's
+own work; note a real gap with no `sync` firing between 08-14T04:47 and
+08-17T03:35, not investigated this checkpoint since D40 was the focus,
+worth a look if it recurs), 33 `runs` rows total (28 `sync`, 3
+`relevance` [the manual CLI], 2 `daily_batch` — ids 23 and 30, D38;
+`daily_batch` has not run again since id 30 on 08-16, so `relevance_scores`/
+`job_analysis`/`keyword_corpus` are all unchanged since last checkpoint,
+not a regression, just nothing has triggered a new run), `relevance_scores`
+1029 rows/951 distinct jobs (unchanged), `job_analysis` 90 rows/79
+distinct jobs (unchanged), `keyword_corpus` 219 rows (unchanged),
+`job_resume_variants` 1/`rubric_results` 1 (unchanged — still only job
+3871's worked example, `applications` still 0 real approvals exist), 4
+`base_resumes` rows (unchanged). `daily_cap` is still `null`;
+`min_relevance_score: 20` (D37) remains the only live relevance-score
+gate on `web/app.py`'s `_new_pairs()`; D40's seniority exclusion (this
+checkpoint) is a second, independent gate upstream of it, in
+`passes_all_filters()`, not a relevance-score gate at all. Of the 951
+distinct scored jobs, 393 (41.3%) are `ats='ashby'` — G1 (D39) cannot
+classify any of them, a real, live-verified gap, not a theoretical one.
 
 ---
 
@@ -547,20 +515,24 @@ theoretical one.
   out as the more decision-relevant metric since it's what F1's new
   score-floor gate actually depends on. See D37 in docs/decisions.md for
   the complete writeup; D36 still has the original numbers for history.
-- **New this session, not yet acted on:** investigating `job_id` 2246
-  (D37) surfaced that B3's seniority filter
-  (`is_above_target_seniority()`, `pipeline/filter.py`) only checks the
-  job *title* against `config/filters.yaml`'s exclusion keywords
-  (manager/director/head of/vp/vice president/chief). A real people-
-  management role can sit under a nominally-IC title ("Staff Software
-  Engineer, API Platform" whose body text says "You will lead a team of
-  engineers... 5+ years in a strategic technical leadership role") and
-  sail through B3 undetected; only C4's body-text LLM read caught this
-  one. A cheap, deterministic body-text phrase check
-  (`is_leadership_role_required()`, same `phrase_matches()` shape as
-  `is_citizenship_or_clearance_required()`) was discussed as a possible
-  free pre-C4 catch for the clearest cases ("lead a team of", "direct
-  reports") but not built — flagged only, needs its own go-ahead.
+- **RESOLVED 2026-08-12 (commit 9b37c71), not still open — this entry
+  used to say "flagged only, not built" and stayed wrong through both
+  the G1 and this checkpoint since no session touched `pipeline/filter.py`
+  in between to catch it.** Investigating `job_id` 2246 (D37) had
+  surfaced that B3's seniority filter (`is_above_target_seniority()`,
+  `pipeline/filter.py`) only checked the job *title* against
+  `config/filters.yaml`'s exclusion keywords, so a real people-management
+  role sitting under a nominally-IC title ("Staff Software Engineer, API
+  Platform" whose body text says "You will lead a team of engineers...
+  5+ years in a strategic technical leadership role") sailed through B3
+  undetected, only caught by C4's body-text LLM read. `is_leadership_role_
+  required()` (`LeadershipConfig.exclude_phrases` in `config/filters.yaml`:
+  "lead a team of", "direct reports", "manage a team", "people
+  management responsibilities") closes this for the clearest cases, same
+  `phrase_matches()` shape as `is_citizenship_or_clearance_required()`,
+  wired into `passes_all_filters()`. 5 new tests in `test_filter.py`.
+  C4's LLM read remains the deeper backstop for subtler leadership
+  language this deterministic phrase list won't catch.
 - **New this session, minor, not blocking:** the disqualifiers-leak fix
   (D37) resolved 22 of 23 previously-affected real jobs cleanly, but one
   (`job_id` 3127) still produces a single disqualifier phrase longer
@@ -1592,6 +1564,61 @@ theoretical one.
 ## Session log
 
 (Newest first. Date, task id, what changed, what to do next.)
+
+- 2026-08-17, D40 (done): B3's `is_above_target_seniority()` gained
+  staff/principal/distinguished exclusion. Grounded before coding: 181
+  "staff" titles in the 861 real open+scored jobs at investigation time
+  hand-reviewed individually, zero false positives outside "Member of
+  Technical Staff" (Anthropic/OpenAI's flat, band-agnostic title).
+  `SeniorityConfig` gained `exclude_override_keywords` (exempts the bare
+  MTS phrase, same exclude/override shape as `software_engineer`'s
+  "forward deployed" exception) and `exclude_override_exceptions`
+  (un-exempts "Senior/Lead Member of Technical Staff," real titles that
+  do carry band information — 5 already existed in the open jobs table,
+  unscored, caught before a future `daily_batch` run would have silently
+  let them through). `is_above_target_seniority()` is now a three-tier
+  check, `phrase_matches()` reused throughout, no new matching
+  primitive. Live-verified against the real, current db at this
+  checkpoint (838 open+scored, the population having shifted from D40's
+  own 861-job investigation number as jobs closed in between): 190/838
+  excluded on seniority alone (22.7%), 637/838 survive every B3 filter
+  combined, top-20 by relevance spread across 10 distinct companies. 7
+  new tests, 1 existing test reversed by design
+  (`test_seniority_does_not_exclude_staff_ai_engineer`). Full suite
+  477/477, ruff clean. D40 written up in full in docs/decisions.md.
+  Also caught and fixed while checkpointing, not part of D40's own
+  scope: PROGRESS.md's "What exists" (pipeline/) and Known Issues
+  sections had never been updated for `is_leadership_role_required()`
+  (commit 9b37c71, 2026-08-12), landing 5 days before the last
+  checkpoint but never reflected in it since that checkpoint's own
+  session (G1) never touched `filter.py`; corrected in this checkpoint,
+  see the entry below.
+  Committed and pushed this session (unlike the last two checkpoints,
+  which explicitly deferred committing).
+  Next: no next task chosen, needs go-ahead. B3-followup (daily-cap
+  calibration) now has a meaningfully different, D40-narrowed population
+  to calibrate against than when D23 deferred it; otherwise same
+  candidates as last checkpoint (G2, F2, F3, P4).
+
+- 2026-08-12, B3 leadership-role filter (done, retroactively logged
+  2026-08-17): `is_leadership_role_required()` shipped same day as the
+  C4-follow-up checkpoint (commit 9b37c71, after that checkpoint was
+  already written) but was never given its own session-log entry and
+  the "What exists"/Known Issues sections were never updated for it
+  either — caught and fixed 5 days later while writing this checkpoint,
+  not at the time. Closes the C4-follow-up session's own flagged gap
+  (`job_id` 2246: a Staff SWE title with genuine people-management body
+  text that a title-only seniority check couldn't catch, only C4's LLM
+  read did). `LeadershipConfig.exclude_phrases` in `config/filters.yaml`
+  ("lead a team of", "direct reports", "manage a team", "people
+  management responsibilities"), `is_leadership_role_required()` in
+  `pipeline/filter.py`, same `phrase_matches()` shape as
+  `is_citizenship_or_clearance_required()`, wired into
+  `passes_all_filters()`. 5 new tests in `test_filter.py`. C4's LLM read
+  remains the deeper backstop for subtler leadership language this
+  deterministic phrase list won't catch.
+  Next at the time: none chosen. Superseded by this checkpoint's own D40
+  entry above.
 
 - 2026-08-16, F1-batch + G1 (done, D38 + D39): Two pieces of work, both
   real-data-verified, nothing committed to git yet (confirmed explicitly

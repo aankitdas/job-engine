@@ -42,6 +42,19 @@ class LeadershipConfig(BaseModel):
 
 class SeniorityConfig(BaseModel):
     exclude_title_keywords: list[str]
+    # D40: an exclude keyword that would otherwise also catch a band-
+    # agnostic title (e.g. "staff" matching "Member of Technical Staff",
+    # which some companies use as a flat title spanning entry-level
+    # through senior). Same exclude/override shape as
+    # ProfileFilterConfig.exclusion_override_keywords below, not a new
+    # pattern.
+    exclude_override_keywords: list[str] = []
+    # An override itself can be too broad: "member of technical staff"
+    # would also exempt "Senior/Lead Member of Technical Staff," real
+    # titles where the qualifier carries real band information the bare
+    # form doesn't. A title matching one of these stays excluded even
+    # though it also matches exclude_override_keywords.
+    exclude_override_exceptions: list[str] = []
 
 
 class EmploymentTypeConfig(BaseModel):
@@ -201,11 +214,30 @@ def is_leadership_role_required(description: str | None, config: FilterConfig) -
 
 
 def is_above_target_seniority(title: str, config: FilterConfig) -> bool:
+    """D40: a title hitting an exclude keyword can be rescued by
+    exclude_override_keywords (e.g. "staff" matching the band-agnostic
+    "Member of Technical Staff"), but the override itself can be undone
+    by exclude_override_exceptions for a qualified variant that carries
+    real band information the bare override phrase doesn't (e.g.
+    "Senior Member of Technical Staff")."""
     title_lower = title.lower()
-    return any(
+    hit_exclusion = any(
         phrase_matches(keyword, title_lower)
         for keyword in config.seniority.exclude_title_keywords
     )
+    if not hit_exclusion:
+        return False
+    overridden = any(
+        phrase_matches(keyword, title_lower)
+        for keyword in config.seniority.exclude_override_keywords
+    )
+    if not overridden:
+        return True
+    negated = any(
+        phrase_matches(keyword, title_lower)
+        for keyword in config.seniority.exclude_override_exceptions
+    )
+    return negated
 
 
 def _has_us_signal(text_lower: str, config: FilterConfig) -> bool:

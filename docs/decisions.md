@@ -1798,3 +1798,100 @@ fixture wouldn't actually exercise it. Full suite 471/471 (up from 458),
 `ruff check`/`format --check` clean. Nothing from this work is committed
 to git; this entry and the corresponding `/checkpoint` land before any
 commit, per explicit request.
+
+---
+
+**D40. B3's seniority filter now excludes Staff/Senior Staff/Principal/
+Distinguished bands, a real 22.4% narrowing of the survivor funnel the
+pipeline had no other way to see.**
+
+C4 (relevance scoring) judges title and skill match, not seniority band
+-- nothing in the pipeline modeled "is this role above the candidate's
+actual level" until this change. `is_above_target_seniority()`
+previously excluded only manager/director/head of/vp/vice president/
+chief; `config/filters.yaml`'s own comment even documented, as a known
+fact, that Staff/Senior/Lead titles passed through untouched. The result
+was invisible until a real 40-job spot-check of the top-scored live
+Greenhouse jobs (all scoring 95-100) turned out to be almost entirely
+Staff/Senior Staff/Principal-tier roles, above a current graduate
+student's target band -- C4 scored them highly because the title and
+skills genuinely matched a target profile, with no signal anywhere in
+the pipeline for "but this level is wrong."
+
+**Grounded in the real db before proposing anything, same discipline
+B3's original title-alias list used (D23).** Scoped to the 861 jobs that
+were both open and already C4-scored at investigation time (the same
+population the 40-job spot-check was drawn from, not a hypothetical
+one): 181 titles contain "staff" as a genuine senior-IC title, reviewed
+individually, line by line, not sampled -- every one is a real
+`Staff Software Engineer, ...` / `Senior Staff Machine Learning
+Engineer, ...` / `Staff+ Software Engineer, ...` shape, zero false
+positives found outside "Member of Technical Staff." 11 contain
+"principal," 1 is "Distinguished Engineer," both unambiguous. Combined,
+deduplicated, MTS excepted: **193 of 861 (22.4%)** newly excluded.
+Non-engineering "Staff" titles that exist elsewhere in the db (`Staff
+Product Manager`, `Staff UX Researcher`, `Staff Brand Designer`) never
+appear in this population at all -- they don't match any profile's
+`title_aliases`, so they were never reachable by this filter either way.
+
+**The one real ambiguity, handled explicitly per the user's own framing,
+not pattern-matched:** Anthropic/OpenAI use "Member of Technical Staff"
+as a flat, band-agnostic title spanning entry-level through senior --
+the word "staff" inside it does not carry the same signal it does in
+"Staff Software Engineer." `SeniorityConfig` gained
+`exclude_override_keywords` (`"member of technical staff"`), same
+exclude/override shape `ProfileFilterConfig.exclusion_override_keywords`
+already uses for `software_engineer`'s "forward deployed" exception, not
+a new pattern. But the override reasoning is specific to the *bare*
+title -- "Senior Member of Technical Staff" and "Lead Member of
+Technical Staff" are real titles where the qualifier carries exactly the
+band information the bare form lacks, so the override reasoning does
+not extend to them. A broad substring override would have silently
+exempted these too, with **0 blast radius today but a real, confirmed
+divergence waiting**: 4 `Senior Member of Technical Staff, ...` and 1
+`Lead Member of Technical Staff, ...` titles already exist in the open
+jobs table, just not yet scored -- the same class of quiet
+future-wrongness as the `coverage: 1.0` bank-frequency-fallback caveat
+(D34), caught before it shipped rather than after a future `daily_batch`
+run (D38) scored them and someone had to notice the gap. Fixed with a
+third list, `exclude_override_exceptions`, reusing the identical
+`phrase_matches()` substring/word-boundary mechanism already used
+everywhere else in this file -- deliberately not a prefix-anchored match
+or any other new matching primitive, confirmed by asking: "whichever
+reuses the matching shape already in filters.yaml rather than
+introducing a new mode for one case." `is_above_target_seniority()`
+became a three-tier check (exclude -> override -> exception to the
+override) instead of the previous flat any-match.
+
+**What survives, live-verified against the real db with the actual
+shipped function, not a simulation:** 637 of 838 open+scored jobs (the
+838 denominator reflects real jobs closing between planning and
+implementation, not a bug) pass every B3 filter including this one. Top
+20 by relevance score: 10 distinct companies (Pinterest 4, Figma 3, Brex
+3, Discord/Ramp/DoorDash 2 each, Stripe/OpenAI/Airbnb/Robinhood 1 each),
+titles overwhelmingly plain `Software Engineer` / `Senior Software
+Engineer` / `Data Scientist` -- the filter produced the intended shape,
+not a thin or single-company-dominated list, checked now rather than
+discovered at apply time per explicit request.
+
+**Interaction with two known-deferred items, recorded so a future
+session doesn't misread a thin queue as a bug:** B3-followup's
+`daily_cap` calibration (D23) is still deferred and was never tuned
+against any real survivor count -- this filter narrows the population
+that calibration would eventually be tuned against by another ~22%, on
+top of B3's original filters, so a future B3-followup session needs to
+account for this cut specifically, not just re-derive against B3's
+original numbers. Separately, the 15-company registry (specs/04-sources.md,
+still short of the 150-300 target) is **not** currently the binding
+constraint -- the top-20 simulation above spans 10 distinct companies
+with real headroom -- but a future session that finds the queue thin
+should check company-registry size and `daily_cap` before assuming this
+seniority change over-cut; today's evidence says it didn't.
+
+7 new tests in `tests/test_filter.py`, run against the real
+`config/filters.yaml` (the `config` fixture loads the production file
+directly, not a synthetic mock), including the one existing test this
+change deliberately reverses
+(`test_seniority_does_not_exclude_staff_ai_engineer` -> removed, staff
+is now excluded by design). Full suite 477/477 (up from 471), `ruff
+check`/`format --check` clean.

@@ -379,8 +379,48 @@ def test_seniority_does_not_exclude_senior_software_engineer(config):
     assert is_above_target_seniority("Senior Software Engineer", config) is False
 
 
-def test_seniority_does_not_exclude_staff_ai_engineer(config):
-    assert is_above_target_seniority("Staff AI Engineer", config) is False
+# --- D40: staff/principal/distinguished, grounded in the real 861-job
+# blast-radius review (193/861, 22.4%) and the real MTS false-positive
+# (Anthropic/OpenAI use "Member of Technical Staff" as a flat,
+# band-agnostic title; the qualified Senior/Lead variants carry real
+# band information the bare form doesn't, so they must stay excluded).
+
+
+def test_seniority_excludes_staff_software_engineer(config):
+    assert is_above_target_seniority("Staff Software Engineer, X", config) is True
+
+
+def test_seniority_excludes_senior_staff_machine_learning_engineer(config):
+    title = "Senior Staff Machine Learning Engineer, Trust"
+    assert is_above_target_seniority(title, config) is True
+
+
+def test_seniority_excludes_principal_engineer(config):
+    title = "Principal Machine Learning Engineer, Ads Delivery"
+    assert is_above_target_seniority(title, config) is True
+
+
+def test_seniority_excludes_distinguished_engineer(config):
+    assert is_above_target_seniority("Distinguished Engineer", config) is True
+
+
+def test_seniority_does_not_exclude_bare_member_of_technical_staff(config):
+    title = "Member of Technical Staff, Training Infra Engineer"
+    assert is_above_target_seniority(title, config) is False
+
+
+def test_seniority_excludes_senior_member_of_technical_staff(config):
+    """The override exception: real, unscored titles exist today
+    ("Senior Member of Technical Staff, Multimodal AI" and 3 others) that
+    would be silently exempted by a broad MTS override with no evidence
+    that reasoning extends to a Senior-qualified title."""
+    title = "Senior Member of Technical Staff, Multimodal AI"
+    assert is_above_target_seniority(title, config) is True
+
+
+def test_seniority_excludes_lead_member_of_technical_staff(config):
+    title = "Lead Member of Technical Staff, Inference Infrastructure"
+    assert is_above_target_seniority(title, config) is True
 
 
 # --- is_us_location: cross-profile hard requirement (remote OR US) ---

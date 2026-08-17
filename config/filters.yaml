@@ -82,12 +82,27 @@ profiles:
       - "people research"
 
 # Hard exclude, applied across ALL profiles, not per-profile: unlike
-# software_engineer's exclusion_keywords, there is no override list here.
-# Confirmed by asking: no title shape exists where a Manager/Director/VP/
-# Chief title should still count as an IC target role, unlike "Forward
-# Deployed Software Engineer" overriding "forward deployed" above.
-# Word-boundary matching means "Senior"/"Staff"/"Lead" IC titles are
-# unaffected (none of these keywords are substrings of those words).
+# software_engineer's exclusion_keywords, manager/director/vp/chief have
+# no override list -- confirmed by asking, no title shape exists where
+# one of those should still count as an IC target role.
+#
+# staff/principal/distinguished added per D40 in docs/decisions.md: C4
+# scores by title/skill match, not seniority band, so these bands were
+# scoring 95-100 and dominating the queue above a current graduate
+# student's target level. Grounded against the real db, not assumed:
+# 193 of 861 open+scored jobs (22.4%) newly excluded at the time D40 was
+# written; every one of the 181 non-MTS "staff" titles was hand-reviewed
+# and is a genuine Staff/Senior Staff/Staff+ engineering/ML/data title,
+# zero false positives found outside "Member of Technical Staff".
+#
+# exclude_override_keywords/exclude_override_exceptions exist for
+# exactly that one case: Anthropic/OpenAI use "Member of Technical
+# Staff" as a flat, band-agnostic title (including entry-level), so the
+# bare phrase is exempted from the "staff" exclude -- but a real,
+# currently-unscored "Senior/Lead Member of Technical Staff" title DOES
+# carry band information the bare form doesn't, so those stay excluded
+# via the exception list rather than silently riding the broad override
+# once they get scored. See D40 for the full real-data writeup.
 seniority:
   exclude_title_keywords:
     - "manager"
@@ -96,6 +111,14 @@ seniority:
     - "vp"
     - "vice president"
     - "chief"
+    - "staff"
+    - "principal"
+    - "distinguished"
+  exclude_override_keywords:
+    - "member of technical staff"
+  exclude_override_exceptions:
+    - "senior member of technical staff"
+    - "lead member of technical staff"
 
 location:
   remote_synonyms:
