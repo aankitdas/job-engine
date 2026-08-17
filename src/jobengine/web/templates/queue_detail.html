@@ -52,6 +52,9 @@
   <h3>Resume</h3>
   <embed src="{{ pdf_url }}" type="application/pdf" width="100%" height="600px">
   {% endif %}
+  {% if docx_url %}
+  <p><a href="{{ docx_url }}" download>Download .docx</a></p>
+  {% endif %}
 
   <form class="actions" method="post" action="/jobs/{{ job.id }}/{{ profile }}/reject" style="display:inline">
     <button type="submit" class="reject">Reject</button>

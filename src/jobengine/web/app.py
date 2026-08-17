@@ -170,20 +170,22 @@ def queue_detail(
             "analysis": analysis,
             "rubric_results": rubric_results,
             "pdf_url": _resume_static_url(variant.pdf_path),
+            "docx_url": _resume_static_url(variant.docx_path),
         },
     )
 
 
-def _resume_static_url(pdf_path: str | None) -> str | None:
-    """variant.pdf_path is a path like "resume/rendered/variants/1/
-    software_engineer/x.pdf"; the StaticFiles mount at /resume serves
-    the resume/ directory's contents directly, so the URL is the same
-    path with the leading "resume/" stripped."""
-    if pdf_path is None:
+def _resume_static_url(path: str | None) -> str | None:
+    """Not PDF-specific despite call sites: variant.pdf_path/docx_path
+    are both paths like "resume/rendered/variants/1/software_engineer/
+    x.pdf"; the StaticFiles mount at /resume serves the resume/
+    directory's contents directly, so the URL is the same path with the
+    leading "resume/" stripped."""
+    if path is None:
         return None
     prefix = "resume/"
-    if pdf_path.startswith(prefix):
-        return "/resume/" + pdf_path[len(prefix) :]
+    if path.startswith(prefix):
+        return "/resume/" + path[len(prefix) :]
     return None
 
 

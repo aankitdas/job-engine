@@ -442,7 +442,9 @@ Snapshot history cannot be backfilled.
 
 ## Phase G: Apply
 
-- [ ] **G1. Form schema fetch + autonomy gating** (no browser)
+- [x] **G1. Form schema fetch + autonomy gating** (no browser) --
+  Greenhouse only, see D39 in docs/decisions.md (Ashby has no working
+  public form-schema endpoint, confirmed live)
 - [ ] **G2. Playwright filler, dry-run only**
 - [ ] **G3. Level 2, pause before submit**
 - [ ] **G4. Level 3, capped at 3/day**

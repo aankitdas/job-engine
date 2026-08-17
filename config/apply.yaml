@@ -1,0 +1,32 @@
+# G1 config: form-schema-derived autonomy classification. See
+# docs/decisions.md D16 ("autonomy level is decided deterministically
+# from the form schema"), D39 (the real 40-job run that inverted
+# classify_autonomy_ceiling()'s default), and the G1 plan
+# (docs/decisions.md, Phase G has no dedicated spec file yet, same
+# reasoning as F1/D35).
+#
+# mapped_question_labels: custom question labels classify_autonomy_ceiling()
+# treats as recognized/answerable even when required. Since the D39 fix,
+# EVERY required field on a form must be either a Greenhouse standard
+# identity field or listed here for a job to reach ceiling 2 -- so this
+# list is load-bearing on real data, not a defensive no-op. Confirmed
+# live: Airbnb job 7995153 ("Acquisition Manager") has "How did you hear
+# about this job?" as a required input_text field; without this entry
+# that job would incorrectly cap at ceiling 1. Matched case-insensitively
+# against a Greenhouse question's label, grown by hand, same convention
+# as config/relevance.yaml's disqualifier_blocklist.
+#
+# Deliberately does NOT include eligibility questions ("Are you legally
+# authorized to work...", "Will you require sponsorship...", relocation,
+# "currently located in the US") even though they recur across real
+# forms (Discord job 3950, Airbnb jobs 8129371/7995153) and are
+# philosophically identity.toml-answerable per D16. G1 is fetch+classify
+# only -- it has no identity.toml lookup logic. Adding these labels here
+# without that logic would silently promote a job's ceiling on a
+# question nothing in this codebase actually answers. Revisit once a
+# future session (G2 territory) builds the real identity.toml mapping.
+mapped_question_labels:
+  - "How did you hear about this job?"
+  - "LinkedIn Profile"
+  - "Website"
+  - "Portfolio"

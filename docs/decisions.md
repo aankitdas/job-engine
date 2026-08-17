@@ -1687,3 +1687,114 @@ assertion, and a regression test pinning `web/app.py`'s
 `_LIST_WINDOW_DAYS` to the same `WINDOW_DAYS` constant `batch.py` now
 owns, so the two can't silently drift apart again. Full suite 458/458
 (up from 441), `ruff check`/`format --check` clean.
+
+---
+
+**D39. G1 (form schema fetch + autonomy gating) ships Greenhouse-only,
+with a classification rule inverted after a real 40-job live run found
+the first cut too permissive, and a real finding that falsifies D16's
+literal claim rather than just narrowing it.**
+
+**The Ashby gap, real and falsifying, not a scope footnote.** D16 says
+"both APIs expose a schema pre-browser." Verified live against a real
+job (3902, Notion): a direct GET against the one plausible per-job
+Ashby posting-api endpoint returned `401 Unauthorized`; the public apply
+page (`jobs.ashbyhq.com/notion/{id}/application`) is a client-rendered
+SPA whose only embedded state (`window.__appData`) is Datadog/org
+config, not a field schema. Greenhouse, by contrast, has a clean, public,
+unauthenticated endpoint (`GET .../jobs/{id}?questions=true`) confirmed
+live and used as-is. Real, live-verified impact at this checkpoint: 393
+of 951 distinct scored jobs (41.3%; 362/861, 42.0% open-only) are
+`ats='ashby'` — none of them can be classified, and stay implicitly on
+the fully manual path. Recorded as a falsification, not a mere gap: the
+architecture's own D16 claim was checked against real API behavior and
+found wrong for one of the two ATSs, same standard this project has
+applied to its own prior claims (D36's contaminated numbers, D27's
+literal-DoD misses). G1 ships anyway, scoped to Greenhouse, same
+D27-style precedent (ship the real, verified subset; don't hold for the
+harder remaining piece).
+
+**The classification rule, inverted after real data, not shipped on
+first-pass synthetic confidence.** The first cut of
+`classify_autonomy_ceiling()` capped a job's autonomy ceiling at 1 only
+if a required *free-text* field existed beyond Greenhouse's standard
+identity fields, confirmed by `AskUserQuestion` before implementation
+and verified against one real job (3950, Discord) before shipping. The
+user then ran a real 40-job live run (top Greenhouse jobs, score>=20,
+open) and found this too permissive: 21/40 jobs classified at ceiling 2,
+but 20 of those 21 had required `multi_value_single_select` fields the
+system has no way to answer — Airbnb's "Candidate AI Usage Attestation,"
+"Airbnb Candidate Privacy Policy," non-compete/relocation/eligibility
+acknowledgments — invisible to a free-text-only check since they're
+selects, not text. Only job 2650 (Anthropic: required fields exactly
+`first_name`/`last_name`/`email`, all standard) genuinely had zero
+unmapped required fields. **Fix, confirmed by asking:** ceiling 2 now
+requires *every* required field on the form to be recognized — a
+Greenhouse standard identity field or a label in `config/apply.yaml`'s
+`mapped_question_labels` (renamed from `safe_optional_question_labels`,
+whose old comment claiming "today's data doesn't need this list" was
+itself disproved live: Airbnb job 7995153, "Acquisition Manager," has
+"How did you hear about this job?" as `input_text`, `required=True`).
+Any other required field caps the job at 1. `classify_autonomy_ceiling()`
+now returns `AutonomyClassification` (ceiling + the unmapped required
+fields), not a bare int — the list is the decision-relevant signal G2
+will need to know what a human must fill, the same way `top30_overlap`
+mattered more than raw rho in D37.
+
+**Eligibility-question labels deliberately held out of the mapped list,
+confirmed by asking a second time.** "Are you legally authorized to
+work...", "Will you require sponsorship...", relocation, and "currently
+located in the US" recur across real forms (Discord 3950, Airbnb
+4466/7995153) and are philosophically identity.toml-answerable per D16.
+Not added to `mapped_question_labels` anyway: G1 is fetch-and-classify
+only, with no identity.toml lookup logic; adding the label without that
+logic would silently promote a job's ceiling on a question nothing in
+this codebase actually answers. Verified this doesn't change either
+grounding job's real outcome (2650 has none of these fields present;
+4466 caps at 1 regardless, via the privacy-policy/non-compete/AI-
+attestation fields alone) — the choice only matters for a hypothetical
+future job whose sole non-standard required fields are these eligibility
+questions with no other attestations. Revisit once a future session (G2
+territory) builds the real identity.toml mapping.
+
+**Two more real field-modeling bugs, found in the same investigation.**
+(1) Greenhouse represents "provide ONE of these" (Resume/CV: file
+upload OR pasted text) as multiple `fields` entries sharing one
+question's `label` and single `required` flag — confirmed live on job
+4466, `resume` and `resume_text` both `required=True`. A flat per-field
+check would, for any OR-group where one alternative is non-standard,
+wrongly cap a job whose *other* alternative was actually sufficient.
+Fixed by grouping required fields by `label` before classifying: a
+group is satisfied if *any* field in it is recognized, contributing to
+`unmapped_required_fields` only if *no* alternative is — one
+representative field per group, not one per alternative. This grouping
+is free, structurally-correct information already present in
+Greenhouse's real JSON (fields nested under one question object), not a
+heuristic. (2) `cover_letter`/`cover_letter_text` were in
+`_STANDARD_FIELD_NAMES`, so a required cover letter silently passed as
+safe. Wrong: a required cover letter needs genuinely generated prose,
+the same fabrication-risk category as a custom free-text essay (D18) --
+it must never pass the way résumé does (résumé stays standard because
+this pipeline already deterministically produces that exact file, D3/D4;
+cover letter has no equivalent deterministic source anywhere in this
+codebase). Latent in the 40-job sample (0/40 required one) but real,
+confirmed on job 7995153, which does. Fixed by removing both names from
+`_STANDARD_FIELD_NAMES`; no special-casing needed, the general
+recognized-or-not fallback now handles it correctly.
+
+**All three grounding jobs re-verified live post-fix via the real CLI**
+(`python -m jobengine.apply.form_schema {2650,4466,410}`), matching the
+plan exactly before any code was called done: 2650 -> ceiling 2, empty
+unmapped list; 4466 -> ceiling 1, the 6 real unmapped Airbnb attestation/
+eligibility labels, "How did you hear" correctly absent; 410 (7995153)
+-> ceiling 1, "Cover Letter" now correctly present in the unmapped list,
+"How did you hear" still correctly absent. 12 tests in
+`tests/test_form_schema.py` (3 new, 9 rewritten for the new
+`AutonomyClassification` return shape), all built on real captured
+Greenhouse response shapes (Discord, both Airbnb jobs), not synthetic
+minimal fixtures -- the whole rule depends on Greenhouse's real
+`question_<id>`-vs-clean-name field-naming convention, so a synthetic
+fixture wouldn't actually exercise it. Full suite 471/471 (up from 458),
+`ruff check`/`format --check` clean. Nothing from this work is committed
+to git; this entry and the corresponding `/checkpoint` land before any
+commit, per explicit request.

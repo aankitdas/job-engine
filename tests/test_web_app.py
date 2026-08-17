@@ -7,6 +7,7 @@ never the real data/jobengine.db.
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -71,7 +72,15 @@ def _seed_job(
     title="Software Engineer",
     description="Requirements:\n- Go\n",
     location_raw="San Francisco, CA",
+    first_seen_at=None,
 ) -> int:
+    # Relative to "now" (1 day old), not a hardcoded literal: several
+    # tests below assert a job appears in GET /'s _LIST_WINDOW_DAYS
+    # window, and a fixed past date eventually ages out as real session
+    # time passes, failing tests that have nothing to do with whatever
+    # actually changed.
+    if first_seen_at is None:
+        first_seen_at = (datetime.now(UTC) - timedelta(days=1)).isoformat()
     _seed_company(conn)
     return upsert_job(
         conn,
@@ -83,8 +92,8 @@ def _seed_job(
             description=description,
             location_raw=location_raw,
             raw_json="{}",
-            first_seen_at="2026-08-07T00:00:00+00:00",
-            last_seen_at="2026-08-07T00:00:00+00:00",
+            first_seen_at=first_seen_at,
+            last_seen_at=first_seen_at,
         ),
     )
 
@@ -221,6 +230,19 @@ def test_detail_page_first_visit_triggers_ensure_reviewed_and_persists(
     assert response.status_code == 200
     assert get_job_resume_variant(conn, job_id, "software_engineer") is not None
     assert "R001" in response.text
+
+
+def test_detail_page_links_the_rendered_docx_for_download(conn, client_factory):
+    job_id = _seed_job(conn)
+    _seed_base_resume(conn)
+    client = client_factory(_FakeClient(_EXTRACT_PAYLOAD))
+
+    response = client.get(f"/jobs/{job_id}/software_engineer")
+
+    variant = get_job_resume_variant(conn, job_id, "software_engineer")
+    docx_url = "/resume/" + variant.docx_path.removeprefix("resume/")
+    assert f'href="{docx_url}"' in response.text
+    assert "download" in response.text
 
 
 def test_detail_page_second_visit_does_not_retrigger(conn, client_factory):

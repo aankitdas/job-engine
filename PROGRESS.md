@@ -3,84 +3,115 @@
 **Claude Code: read this file at the start of every session and update it at
 the end via `/checkpoint`. Do not rely on memory of previous sessions.**
 
-Last updated: 2026-08-12
-Current task: **C4 (relevance pre-filter) is done, closed a second time
-with real numbers after a real follow-up investigation (D37).** A
-post-close spot-check while wiring F1's new relevance floor gate found
-Task 1's original rho/overlap numbers (D36: rho 0.23-0.35, overlap
-0.63-0.70) were contaminated by three real, now-fixed bugs: (1)
-`LocalProvider` never set `temperature`/`seed`, so identical calls
-produced wildly different scores (job 2809: 0->72->0 across 3 identical
-calls) — this session's single biggest finding, now confirmed closed,
-not just patched; (2) 4 `human_labels.yaml` entries were too generous
-(a real people-management role under an IC title, 2 domain mismatches,
-1 embedded-hardware role scored as if ML-relevant) — corrected with
-quoted-JD justification, same convention as D26; (3) the `disqualifiers`
-field was leaking hundreds of words of raw chain-of-thought and
-contradicting its own `relevance` score (6 real jobs scored 0 while
-their own `one_line` called them "excellent"/"strong" matches) —
-generalized `_RELEVANCE_PROMPT`'s instruction, verified clean on 22/23
-previously-affected real jobs. Re-ran the full 50-job/150-point Task 1
-fixture after all three fixes: rho still fails its 0.70 bar on all 3
-profiles (0.557/0.449/0.470, real improvement over D36 but not a pass),
-top30_overlap now passes on 2/3 and is 0.017 from passing on the third
-(0.767/0.767/0.733). Shipped anyway per the same D27/D36 precedent —
-real numbers on record, top30_overlap called out as the more
-decision-relevant metric since it's what F1's new score-floor gate
-actually depends on, not full-list rank correlation. F1's `_new_pairs()`
-now gates on `passes_relevance_floor()`
-(`config/relevance.yaml`'s `min_relevance_score: 20`) in addition to
-`passes_all_filters()` — C4's score finally does something downstream;
-before this session `relevance_scores.selected` was 1 for all 921 rows
-and nothing consumed it. See D37 in docs/decisions.md for the complete
-writeup; D36 still has the original close for history.
-Built `src/jobengine/pipeline/relevance.py` (`RelevanceSchema`,
-`build_profile_card()`/`render_profile_card()`, `score_relevance()`,
-`score_job()`, `select_top_n()`/`apply_relevance_cutoff()`, the
-`score`/`calibrate` CLI per spec 06's literal invocation),
-`db/models.py`'s `RelevanceScore` + 5 helpers, new `config/
-relevance.yaml` (`disqualifier_blocklist`, `freshness_window_days`, both
-deferred/`null` per the same D23 reasoning as `daily_cap`), and
-`eval/tasks/relevance.py` (Task 1, hand-rolled Spearman rho, no new
-dependency) wired into the existing eval harness alongside Task 2.
-Confirmed by construction, not just claimed: "relevance" was already a
-first-class `Stage` in `llm/schemas.py`/`config/llm.toml` before this
-session, so C4 needed zero changes to `router.py`/`providers/local.py`
-to reuse the router/`think=false` convention.
-**Three real bugs found and fixed during this session, none left as
-theoretical risk:** (1) the first live-model prototype hung 13+ minutes;
-root-caused by re-running the same escalating sizes against the real
-shipped `RelevanceSchema` (properly `Literal`/`Field`-constrained,
-unlike the ad hoc prototype schema) — zero hangs at any size, 5-16s per
-call including spec 06's full 6k-char/30-keyword shape; added an
-`asyncio.wait_for` timeout to `score_relevance()` anyway as defense in
-depth. (2) `score_job()` gated only on title match, not B3's full
-filter chain — a real count against the live db (1049 title-matches vs.
-854 full-chain survivors) showed this would have wasted ~195 real LLM
-calls before the expensive production run even started; fixed to gate
-on `passes_all_filters()` first. (3) Real relocation-requiring US jobs
-were scoring low/flagged "disqualified" — found by the user reviewing
-real scoring output directly, not by any test — because the profile
-card never told the model that `identity.toml`'s own
-`willing_to_relocate=true` means a same-country relocation requirement
-isn't a disqualifier; fixed, verified via real before/after rescoring
-(7 of 8 affected jobs improved, one 0→85).
-**A related, larger feature was explicitly scoped out, not built,** and
-saved to memory for later: the user separately wants the *rendered
-resume's own contact line* to dynamically show "Relocating to X" per
-job, not just the relevance-scoring prompt's internal reasoning. That's
-a different, bigger change (touches `resume/render.py`, needs its own
-per-job-variant design, unrelated to C4's fix) — confirmed with the user
-this is future work, not part of this session.
-50 new tests, written before implementation per hard rule 7
-(`test_relevance.py` 31, `test_eval_relevance.py` 13, `test_db.py`/
-`test_filter.py` additions). `uv run pytest` 432/432 (up from 379 at
-session start), `ruff check`/`format --check` clean.
+Last updated: 2026-08-16
+Current task: **G1 (form schema fetch + autonomy gating, no browser)
+ships with a real classification bug fixed after a real 40-job live run,
+not shipped on first-pass synthetic confidence alone (D39).** The first
+cut of `classify_autonomy_ceiling()` only capped a job's autonomy
+ceiling on a required *free-text* field. A live run against 40 real,
+open, score>=20 Greenhouse jobs found this silently let 21/40 jobs
+through at ceiling 2, but 20 of those 21 had required
+`multi_value_single_select` attestations (Airbnb's "Candidate AI Usage
+Attestation," "Airbnb Candidate Privacy Policy," non-compete
+acknowledgments) the system has no way to answer — invisible to a
+free-text-only check since they're selects, not text. Only job 2650
+(Anthropic) genuinely had zero unmapped required fields. Rule inverted:
+ceiling 2 now requires *every* required field to be a Greenhouse
+standard identity field or explicitly listed in `config/apply.yaml`'s
+`mapped_question_labels` (renamed from `safe_optional_question_labels`,
+whose old comment claiming "today's data doesn't need this list" was
+also disproved live — Airbnb job 7995153 has "How did you hear about
+this job?" as `input_text`, `required=True`). Eligibility questions
+("legally authorized to work," "require sponsorship," relocation) were
+deliberately held out of the mapped list even though they recur across
+real forms and are philosophically identity.toml-answerable per D16:
+G1 has no identity.toml lookup logic yet (fetch+classify only), and
+mapping the label without that logic would silently promote a ceiling
+on a question nothing actually answers — confirmed via `AskUserQuestion`,
+revisit once a future session (G2 territory) builds the real mapping.
+`classify_autonomy_ceiling()` also now returns the unmapped required
+fields alongside the ceiling (`AutonomyClassification`, not a bare int)
+so a future G2 knows exactly what a human must fill.
+**Two more real field-modeling bugs, same investigation:** (1)
+Greenhouse represents "provide ONE of these" (Resume/CV: file upload OR
+pasted text) as multiple `fields` under one question sharing one
+`required` flag — confirmed live on job 4466, `resume`/`resume_text`
+both `required=True`. The flat per-field check would have wrongly
+capped a job whose *other* alternative was actually sufficient; fixed
+by grouping required fields by label before classifying (free,
+structurally-correct grouping already present in Greenhouse's real
+JSON, not a heuristic). (2) `cover_letter`/`cover_letter_text` were
+wrongly in `_STANDARD_FIELD_NAMES` — a required cover letter needs
+genuinely generated prose, the same fabrication-risk category as a
+free-text essay (D18), so it must never silently pass as "standard" the
+way résumé does (résumé stays standard: this pipeline already
+deterministically produces that exact file, D3/D4; cover letter has no
+equivalent source anywhere in this codebase). Latent in the 40-job
+sample (0/40 required one) but real — confirmed on job 7995153, which
+does require one. All three grounding jobs re-verified live post-fix
+via the real CLI (`python -m jobengine.apply.form_schema {2650,4466,410}`):
+2650 -> ceiling 2, empty unmapped list; 4466 -> ceiling 1, the 6 real
+unmapped Airbnb attestation/eligibility labels; 410 (7995153) -> ceiling
+1, "Cover Letter" now correctly appears in the unmapped list and "How
+did you hear" correctly does not. 3 new + 9 rewritten tests in
+`test_form_schema.py` (12 total), all built on real captured Greenhouse
+response shapes (Discord, both Airbnb jobs), not synthetic minimal
+fixtures — `classify_autonomy_ceiling()`'s whole rule depends on
+Greenhouse's real field-naming convention, so a synthetic fixture
+wouldn't actually exercise it. See D39 in docs/decisions.md for the
+complete writeup, including the live-verified Ashby-gap finding this
+prompted: **393 of 951 distinct scored jobs (41.3%; 362/861, 42.0%
+open-only) are `ats='ashby'`**, which G1 cannot classify at all (job
+3902's real `401 Unauthorized` on the one plausible endpoint, no
+schema embedded in Ashby's SPA apply page either) — this falsifies
+D16's literal "both APIs expose a schema pre-browser" claim, not just a
+scope note.
+
+**Also this session, before G1: F1's review queue gained a real daily
+batch orchestrator (D38), the gap D35 explicitly deferred until C4
+existed.** `passes_relevance_floor()` (D37) was failing open on every
+job synced since C4's last manual run — real, live-queried backlog at
+investigation time: 520 open jobs in F1's 7-day window with zero
+`relevance_scores` row, 84 of those real B3 survivors. New
+`src/jobengine/pipeline/batch.py` (`run_daily_batch()`) runs C4 for
+every job in a new incremental candidate query
+(`db/models.py`'s `list_unscored_open_jobs()` — `NOT EXISTS
+relevance_scores`, so a job already scored is never re-sent to the LLM
+by a later run, unlike `relevance.py`'s own `score` CLI which rescans
+the entire open backlog every invocation by design), then runs C3
+(`analyze_job()`) only for jobs where at least one scored profile
+clears the floor (`has_job_analysis()` guards against re-extracting).
+New `scripts/relevance_batch.sh` (once daily, not chained onto
+`sync.sh`'s 3h cadence, matching `docs/architecture.md`'s own stage
+cadence table). **Ran for real against the real backlog before
+scheduling anything unattended, per explicit request:** first catch-up
+run took 13m28s for 158 real LLM calls (93 relevance + 65 extraction),
+zero errors, `runs` id 23 confirms the exact counts
+(`candidates=520 relevance_pairs=93 floor_clearing_jobs=65
+extraction_jobs=65`) — real per-call latency (~5.1s/call) ran ~4-5x
+higher than the `llm.check` reference figure (600-935ms), since real
+relevance/extraction calls carry a full JD + profile card, not a small
+test prompt; projected steady-state cost from real sync `new`-count
+history (108 new jobs/day, span-normalized) is ~33 calls/day, ~3
+minutes, not 13. A pre-existing, unrelated test fragility surfaced
+along the way (3 `test_web_app.py` tests hardcoded a `first_seen_at`
+literal that aged out of the 7-day window as real session time passed)
+and was fixed (`_seed_job`'s default is now relative to `now`, not a
+fixed date). A small, real F1 gap was also closed: `queue_detail.html`
+embedded the rendered PDF inline but never linked the `.docx`, even
+though the file exists and the `/resume` static mount already serves
+it — one-line fix, `_resume_static_url()` reused for both paths.
+Full suite 471/471 (up from 441 at last checkpoint), `ruff check`/
+`format --check` clean.
 Next: no next task chosen yet, needs your go-ahead per the session
-protocol. Open candidates per TODO.md, none started: A4c (watermarking),
+protocol. G2 (Playwright filler, dry-run only) is the natural next
+Phase G step, but needs its own design pass (identity.toml lookups for
+the held-out eligibility questions, actual form-filling). Other open
+candidates per TODO.md, none started: A4c (watermarking),
 B1-followup/B3-followup (deliberately deferred), F2 (metrics dashboard),
 F3 (Telegram notifier). P4 (accept and log to gap_ledger) also remains
-deliberately unbuilt.
+deliberately unbuilt. **Nothing from this session is committed to git
+yet** — confirmed explicitly, this checkpoint updates docs only.
 
 Separately: **B2's Task Scheduler regression is now confirmed fixed, not
 just a positive sign.** Last checkpoint had one real unattended firing
@@ -130,10 +161,10 @@ project's own B1/B2 sessions) treated that file.
 | D4 | Patch P3 | done | `patch.py` gains rephrase+writeback; real deficit closed live (CMB, coverage 0.0->1.0), real bug found+fixed via that run; persist/reload/reuse chain re-verified live with full captured evidence 2026-08-05, see D30 + its second addendum |
 | E1 | Profile config + brief | done | `jobengine.profiles` package: registry (`config/profiles.yaml`) + `profiles brief` CLI; live-verified against real db/bank for all 3 profiles; see D31 |
 | E2 | Base resumes | done | all 3 profiles persisted (`resume/base/{ai_ml_engineer,software_engineer,data_scientist}/v1/`, `ai_ml_engineer` also has v2; `base_resumes` ids 1-4), each `passed: true, hard_failures: []`, `coverage: 1.0`; R002 demoted to scored-only (D33), coverage measured against bank-frequency fallback not real corpus (D34, revisit later) |
-| F1 | Review queue | done | `queue/orchestrate.py` + `web/app.py`, lazy per-job trigger not batch; verified end to end against the real app/db with real job 3871; `_new_pairs()` now also gates on C4's `passes_relevance_floor()`, real production impact measured (84/934 pairs excluded); see D35, D37 |
+| F1 | Review queue | done | `queue/orchestrate.py` + `web/app.py`, patch-ladder rendering stays lazy per-job trigger (unchanged); C4/C3 (relevance/extraction) now have a real daily batch orchestrator (`pipeline/batch.py`, D38), closing D35's deliberately-deferred gap now that C4 exists; `.docx` download link added to `queue_detail.html`; verified end to end against the real app/db with real job 3871 and, this session, a real 13m28s live catch-up run (D38); see D35, D37, D38 |
 | F2 | Dashboard | not started | |
 | F3 | Telegram | not started | |
-| G1 | Autonomy gating | not started | |
+| G1 | Autonomy gating | done | `apply/form_schema.py` + `config/apply.yaml`, Greenhouse-only (Ashby has no public form-schema endpoint, real 401 confirmed, D39); fetch+classify only, no filling/submitting (G2+); `classify_autonomy_ceiling()`'s rule inverted after a real 40-job live run found the first pass too permissive, see D39 |
 | G2 | Playwright dry-run | not started | |
 | G3 | Level 2 apply | not started | |
 | G4 | Level 3 apply | not started | |
@@ -284,9 +315,12 @@ the model's own `relevance` number on real production jobs.
 `RelevanceConfig` gained `min_relevance_score: int = 0`. `config/
 relevance.yaml` (`disqualifier_blocklist`, `freshness_window_days: null`,
 new this session: `min_relevance_score: 20`, a conservative starting
-floor, not a calibrated number). Tests: `test_filter.py` 47,
-`test_extract.py` 14, `test_relevance.py` 36 (up from 31, +5 this
-session: `passes_relevance_floor` coverage).
+floor, not a calibrated number). New this checkpoint: `batch.py`
+(`run_daily_batch()`, D38) — the daily C4/C3 orchestrator, `WINDOW_DAYS`
+(imported by `web/app.py` as `_LIST_WINDOW_DAYS`, single source of
+truth for both), CLI (`python -m jobengine.pipeline.batch`). Tests:
+`test_filter.py` 47, `test_extract.py` 14, `test_relevance.py` 36,
+`test_batch.py` 12 (new this checkpoint).
 
 **llm/** (`src/jobengine/llm/`): `schemas.py`, `providers/local.py`
 (`LocalProvider`, `think=False` pinned on every call), `providers/
@@ -408,20 +442,51 @@ previously-queueable pairs now excluded (79 `software_engineer`, 3
 ones is what surfaced the disqualifiers-leak bug (D37).
 `templates/queue_list.html`/`queue_detail.html` (plain server-rendered
 HTML, no JS, per spec: reviewing means seeing the already-patched
-candidate and deciding, not editing bullet text in a browser).
+candidate and deciding, not editing bullet text in a browser; new this
+checkpoint: `queue_detail.html` links `variant.docx_path` for download
+next to the existing inline PDF embed, `_resume_static_url()` reused for
+both, no longer PDF-specific despite the name).
 `JOBENGINE_DB_PATH` env var overrides `DEFAULT_DB_PATH` for manual
-testing against a scratch copy. `uv run uvicorn jobengine.web.app:app
---reload` (CLAUDE.md's already-documented dev command, now real for the
-first time). Tests: `test_web_app.py`, 13 tests (up from 10, +3 this
-session), FastAPI `TestClient` against a `tmp_path` db via dependency
-override, covering first-visit trigger, second-visit idempotency,
-approve/reject state transitions and their `applications`-row side
-effects, the list page dropping a rejected job, `_new_pairs()`'s
-`passes_all_filters()` gating (a clean untriggered job appears as "not
-yet reviewed," one with a non-US location does not), and (new this
-session) `passes_relevance_floor()` gating: a job scored below the floor
-is omitted, one at or above it appears, and an unscored job still
-appears (fails open).
+testing against a scratch copy. `_LIST_WINDOW_DAYS` now imports
+`pipeline/batch.py`'s `WINDOW_DAYS` (D38) instead of hardcoding its own
+copy. `uv run uvicorn jobengine.web.app:app --reload` (CLAUDE.md's
+already-documented dev command). Tests: `test_web_app.py`, 14 tests (up
+from 13, +1 this checkpoint: the docx download link), FastAPI
+`TestClient` against a `tmp_path` db via dependency override, covering
+first-visit trigger, second-visit idempotency, approve/reject state
+transitions and their `applications`-row side effects, the list page
+dropping a rejected job, `_new_pairs()`'s `passes_all_filters()` gating
+(a clean untriggered job appears as "not yet reviewed," one with a
+non-US location does not), and `passes_relevance_floor()` gating: a job
+scored below the floor is omitted, one at or above it appears, and an
+unscored job still appears (fails open). `_seed_job()`'s default
+`first_seen_at` is now relative to `now` rather than a fixed literal
+date (a pre-existing, unrelated fragility: 3 tests broke this session
+when real elapsed time aged their hardcoded date out of the 7-day
+window — nothing to do with any actual behavior change).
+
+**apply/** (`src/jobengine/apply/`, new this checkpoint, G1): `form_schema.py`
+— `FormField`/`FormSchema`/`ApplyConfig`/`AutonomyClassification`
+(pydantic), `load_apply_config()`, `fetch_greenhouse_form_schema()` (real
+GET to `boards-api.greenhouse.io/v1/boards/{slug}/jobs/{id}?questions=true`,
+reuses `sources/_client.py`'s `make_client()`/`REQUEST_SEMAPHORE`/
+`retryable()` directly, same `transport=` test-injection convention as
+`sources/greenhouse.py`), `classify_autonomy_ceiling()` (deterministic,
+D16; rule inverted post-D39, see Current task above and D39 in
+docs/decisions.md for the full real-data writeup), CLI
+(`python -m jobengine.apply.form_schema <job_id>`, read-only, prints
+fields + ceiling + unmapped required fields for a real job id).
+Greenhouse only — Ashby has no working public form-schema endpoint (job
+3902's real 401, D39); Ashby jobs get no computed ceiling. Does not wire
+into `queue/orchestrate.py`'s `approve()` (still hardcodes
+`autonomy_level=0`): nothing downstream acts on a non-zero level yet
+(G2/G3/G4 don't exist), so writing a real value now would be plumbing
+nothing reads. `config/apply.yaml` (`mapped_question_labels`, 4 real
+labels, deliberately excludes eligibility-question labels pending a
+future identity.toml-lookup design, G2 territory). Tests:
+`test_form_schema.py`, 12 tests, all built on real captured Greenhouse
+response shapes (Discord job 3950, Airbnb jobs 4466/410), not synthetic
+minimal fixtures.
 
 **resume/rendered/variants/** (new this session, F1): per-(job,profile)
 lazily-rendered candidates, `{job_id}/{profile}/candidate_{tiers}.
@@ -429,32 +494,31 @@ lazily-rendered candidates, `{job_id}/{profile}/candidate_{tiers}.
 `3871/software_engineer/candidate_P0_P1_P2_P3.{docx,pdf}` (this
 session's real worked-example verification, see below).
 
-**Full suite: 441/441 passing (up from 432 last checkpoint), `ruff
-check src/` clean, `ruff format --check src/` clean** (3 pre-existing
-`RUF059` warnings in `test_render.py`, confirmed via `git stash` to
-predate an earlier session, untouched, unaffected by this session).
+**Full suite: 471/471 passing (up from 441 last checkpoint), `ruff
+check src/` clean, `ruff format --check src/` clean** (the same 3
+pre-existing `RUF059`-adjacent formatting-only diffs in
+`test_db.py`/`test_db_migrate.py`/`test_profiles_brief.py`/
+`test_render.py`/`test_slop_lint.py` noted at past checkpoints, confirmed
+untouched by this session's own `git diff --stat` on those files).
 
 **`data/jobengine.db` real accumulated state, verified this
-checkpoint:** 15 companies, 4362 jobs (up from 4268 — 3 more real
-unattended syncs, see the B2 note above), 19 `runs` rows (up from 16: 3
-more real `sync` firings, no relevance-stage runs this session — this
-session's real Ollama scoring went through `score_relevance()`/
-`relevance_task.run()` directly, scratch-script-driven for targeted
-re-scores and the Task 1 fixture re-run, not the `score` CLI, so no new
-`runs` rows from that activity), 150 `human_labels` rows (4 relevance
-scores corrected this session, D37: `job_id` 2246/2732/3267/3283, each
-with a quoted-JD justification comment), 46 `model_evals` rows (up from
-40: 6 new Task 1 rows this session, D37's post-fix re-run), 4
-`base_resumes` rows (unchanged), `job_analysis` 1/`keyword_corpus` 7/
-`job_resume_variants` 1/`rubric_results` 1 (all unchanged, F1's own
-first-ever rows, not touched this session), `applications`/`gap_ledger`
-still 0. `relevance_scores` unchanged at 921 rows/854 jobs (this
-session's re-scores were all read-only probes via `score_relevance()`
-directly, never `score_job()`'s upsert — the real production table
-itself wasn't touched, only queried and re-derived against for
-verification). `daily_cap` is still `null`; the new
-`min_relevance_score: 20` floor (D37) is a separate, independent gate
-from `daily_cap`/`selected`, now live in `web/app.py`'s `_new_pairs()`.
+checkpoint:** 15 companies (unchanged), 4505 jobs (up from 4362 — real
+unattended `sync` firings across the elapsed days between checkpoints,
+`runs` id 24-29), 30 `runs` rows total (25 `sync`, 3 `relevance` [the
+manual CLI, not this session's `daily_batch`], 2 `daily_batch` — ids 23
+and 30, D38; cadence between them doesn't yet show clear evidence of
+unattended Task Scheduler firing, both may have been manually invoked,
+not confirmed either way this checkpoint), `relevance_scores` 1029
+rows/951 distinct jobs (up from 921/854 — real growth from both
+`daily_batch` firings), `job_analysis` 90 rows/79 distinct jobs (up from
+1/1), `keyword_corpus` 219 rows (up from 7), `job_resume_variants` 1/
+`rubric_results` 1 (unchanged — still only job 3871's worked example,
+`applications` still 0 real approvals exist), 4 `base_resumes` rows
+(unchanged). `daily_cap` is still `null`; `min_relevance_score: 20`
+(D37) remains the only live gate on `web/app.py`'s `_new_pairs()`. Of
+the 951 distinct scored jobs, 393 (41.3%) are `ats='ashby'` — G1 (D39)
+cannot classify any of them, a real, live-verified gap, not a
+theoretical one.
 
 ---
 
@@ -580,15 +644,16 @@ from `daily_cap`/`selected`, now live in `web/app.py`'s `_new_pairs()`.
   what should happen to an approved job. An approved job just sits in
   `applications` with `status='queued'` until Phase G exists to act on
   it.
-- **F1 has no batch/cron orchestrator, by deliberate scope decision
-  (confirmed via `AskUserQuestion`), not an oversight** — see D35 in
-  docs/decisions.md. `job_resume_variants` only grows one row at a time,
-  each time a human opens a specific `/jobs/{job_id}/{profile}` URL.
-  There is currently no way to see "everything that survived B3 today"
-  pre-scored; the reviewer has to click into the "not yet reviewed"
-  list to trigger scoring for each one. Building a real batch version
-  properly needs C4 (relevance pre-filter, not built) first, per spec
-  08's own stage 2.5 ordering, so this wasn't attempted as a stopgap.
+- **RESOLVED this checkpoint, not still open:** "F1 has no batch/cron
+  orchestrator" used to be recorded here as a deliberate scope cut
+  pending C4 (D35). C4 shipped (D36/D37), and this checkpoint built the
+  daily orchestrator D35 deferred: `pipeline/batch.py` (D38), real-run
+  verified (13m28s first catch-up, zero errors). What's still true and
+  not resolved: `job_resume_variants`/the patch ladder itself is
+  unchanged, still only grows one row at a time on a human opening a
+  specific `/jobs/{job_id}/{profile}` URL — the batch orchestrator only
+  covers C4/C3 (relevance + extraction), not rendering a candidate
+  resume, by deliberate design (see D38).
 - `src/jobengine/web/app.py`'s `_LIST_WINDOW_DAYS = 7` (how far back
   `GET /` looks for newly-matched pairs) is a free, unconfigured choice,
   not derived from anything. Revisit if real usage shows 7 days is too
@@ -716,20 +781,49 @@ from `daily_cap`/`selected`, now live in `web/app.py`'s `_new_pairs()`.
   one). Both are real, confirmed via live `select_for_profile()` runs
   and `bank validate`, not just described; see this session's log entry
   below for the full before/after detail on each.
-- **`job_analysis` and `keyword_corpus` are still 0 rows in the real
-  `data/jobengine.db`, and this now blocks `rubric score`/`explain` from
-  running against real production data, not just C3's corpus feature.**
-  `src/jobengine/rubric/__main__.py`'s `_load_job_keywords()` reads
-  `job_analysis` directly and raises a clear `SystemExit` if the
-  `(job_id, profile)` row doesn't exist; it deliberately never calls the
-  LLM itself (the rubric stays deterministic by construction, D8). This
-  session verified the CLI works end to end only against a scratch copy
-  of the db (`analyze_job()` run live, real Ollama, real persistence, but
-  to a `cp`'d file in the scratchpad, never `data/jobengine.db`). No
-  daily-pipeline orchestrator exists yet to populate `job_analysis` for
-  real jobs (same gap C3's session flagged, still open); until one does,
-  `rubric score` against a real job_id in the real db will always fail
-  with that `SystemExit` today.
+- **PARTIALLY RESOLVED this checkpoint:** `job_analysis`/`keyword_corpus`
+  used to be recorded here as 0 rows with no daily orchestrator to
+  populate them. `pipeline/batch.py` (D38) now populates both for real,
+  floor-clearing jobs: 90 `job_analysis` rows/79 distinct jobs, 219
+  `keyword_corpus` rows as of this checkpoint (both up from 1/1/7). Still
+  true and not resolved: coverage is bounded to jobs that clear C4's
+  relevance floor (D38's deliberate cost/coverage tradeoff — extracting
+  keywords for a job nothing in F1 will ever surface to a reviewer would
+  be wasted LLM cost), so `rubric score`/`explain` against an arbitrary
+  real job_id can still hit `_load_job_keywords()`'s `SystemExit` if that
+  specific job never cleared the floor. `src/jobengine/rubric/__main__.py`'s
+  `_load_job_keywords()` itself is unchanged, still deliberately never
+  calls the LLM (D8).
+- **New this checkpoint: G1 (`apply/form_schema.py`) covers Greenhouse
+  only — 393 of 951 real scored jobs (41.3%) are `ats='ashby'` and get no
+  computed autonomy ceiling at all, staying implicitly on the fully
+  manual path.** Real, live-verified, not a guess: a direct GET against
+  a plausible per-job Ashby posting-api endpoint (job 3902, Notion)
+  returned `401 Unauthorized`; the public apply page is a client-rendered
+  SPA whose only embedded state (`window.__appData`) is Datadog/org
+  config, no form fields. This falsifies D16's literal "both APIs expose
+  a schema pre-browser" claim — recorded as D39 in docs/decisions.md, not
+  silently patched over. Revisit once a real Ashby endpoint surfaces or
+  G2's browser automation can read a rendered form's DOM directly instead
+  of relying on an API.
+- **New this checkpoint: `config/apply.yaml`'s `mapped_question_labels`
+  deliberately excludes eligibility questions** ("Are you legally
+  authorized to work...", sponsorship, relocation, "currently located in
+  the US") even though they recur across real forms (Discord job 3950,
+  Airbnb jobs 4466/7995153) and D16 frames them as identity.toml-
+  answerable in principle. G1 is fetch+classify only, no identity.toml
+  lookup logic exists yet; a job whose only non-standard required fields
+  are these eligibility questions will cap at ceiling 1 until a future
+  session (G2 territory) builds the real mapping and confirms it's safe
+  to widen. Confirmed via `AskUserQuestion`, not assumed.
+- **New this checkpoint: `queue/orchestrate.py`'s `approve()` still
+  hardcodes `autonomy_level=0` on every `applications` row, even for a
+  job G1 could now classify at ceiling 1 or 2.** Deliberate: nothing
+  downstream reads a non-zero level yet (G2/G3/G4 don't exist), so
+  wiring `classify_autonomy_ceiling()`'s result into `approve()` now
+  would be writing a number nothing acts on, same shape as `daily_cap`'s
+  D23-flagged unexercised-plumbing caution. Wire it in whichever of
+  G2/G3 first has real behavior to gate on.
 - `src/jobengine/rubric/measure.py`'s `stem()` is suffix-only
   normalization, not synonym-aware. Confirmed against real C3 output this
   session: "LLM" (a bank keyword tag) and "Large Language Models" (a real
@@ -1161,6 +1255,21 @@ from `daily_cap`/`selected`, now live in `web/app.py`'s `_new_pairs()`.
 
 ## Decisions made during implementation
 
+- This checkpoint: the daily batch orchestrator (`pipeline/batch.py`)
+  runs once daily on its own Task Scheduler entry, not chained onto
+  `sync.sh`'s 3h cadence, and gates C3 extraction on C4's relevance
+  floor rather than running it for every B3 survivor unconditionally.
+  Both confirmed by asking. Significant enough to also be recorded as
+  D38 in docs/decisions.md, including the cost/coverage tradeoff the
+  floor-gating creates for `keyword_corpus`.
+- This checkpoint: G1's `classify_autonomy_ceiling()` rule, its
+  Greenhouse-only scope (Ashby's real 401 gap), and the decision to hold
+  eligibility-question labels out of `config/apply.yaml`'s
+  `mapped_question_labels` pending a future identity.toml-lookup design
+  were all confirmed by asking (`AskUserQuestion`) before implementation,
+  twice — once for the initial build, once for the real-data fix after
+  the 40-job live run. Recorded as D39 in docs/decisions.md, including
+  the falsified-D16 finding.
 - Renamed the scaffolded `src/job_engine` (uv's default from the hyphenated
   project name) to `src/jobengine`, and added
   `[tool.uv.build-backend] module-name = "jobengine"` to pyproject.toml, to
@@ -1483,6 +1592,66 @@ from `daily_cap`/`selected`, now live in `web/app.py`'s `_new_pairs()`.
 ## Session log
 
 (Newest first. Date, task id, what changed, what to do next.)
+
+- 2026-08-16, F1-batch + G1 (done, D38 + D39): Two pieces of work, both
+  real-data-verified, nothing committed to git yet (confirmed explicitly
+  by request — this checkpoint is docs-only).
+  **F1-batch (D38):** closed D35's deliberately-deferred gap now that C4
+  exists. Live-queried the real backlog first (520 open jobs in F1's
+  7-day window with zero `relevance_scores` row, 84 real B3 survivors)
+  before writing any code. New `pipeline/batch.py` (`run_daily_batch()`),
+  new `db/models.py` accessors `list_unscored_open_jobs()` (`NOT EXISTS
+  relevance_scores`, the incremental-safety guarantee) and
+  `has_job_analysis()`, new `scripts/relevance_batch.sh` (once daily, not
+  chained onto `sync.sh`, matching `docs/architecture.md`'s stage-cadence
+  table). Ran for real against the real db before scheduling anything
+  unattended, per explicit request: 13m28s, 158 real LLM calls (93
+  relevance + 65 extraction), zero errors, `runs` id 23 confirms exact
+  counts. Real per-call latency (~5.1s) ran ~4-5x the `llm.check`
+  reference figure (600-935ms) — real relevance/extraction calls carry a
+  full JD + profile card, not a small test prompt; flagged explicitly
+  rather than left as a silent estimate miss. Projected steady-state
+  cost from real sync history: ~33 calls/day, ~3 minutes. Also fixed a
+  pre-existing, unrelated `test_web_app.py` fragility (3 tests' hardcoded
+  `first_seen_at` aged out of the 7-day window as real session time
+  passed — `_seed_job`'s default is now relative to `now`). Also added a
+  small real F1 gap fix: `.docx` never linked in `queue_detail.html`
+  despite the file existing and `/resume` already serving it —
+  `_resume_static_url()` reused for both paths.
+  **G1 (D39):** built `apply/form_schema.py` + `config/apply.yaml`
+  (Greenhouse-only; Ashby's real per-job endpoint returns 401, no schema
+  in its SPA apply page either, confirmed live against job 3902 —
+  falsifies D16's literal "both APIs expose a schema pre-browser" claim,
+  recorded as such, not glossed over). First cut verified against one
+  real job (3950, Discord) before a broader check. **User then ran a
+  real 40-job live run (top Greenhouse jobs, score>=20, open) and found
+  the classifier was too permissive:** 21/40 jobs classified at ceiling
+  2, but 20 of those had required `multi_value_single_select`
+  attestations (Airbnb privacy policy consent, non-compete, AI-usage
+  attestation) invisible to the original free-text-only check. Only job
+  2650 genuinely had zero unmapped required fields. Fixed by requiring
+  every required field to be recognized (standard or explicitly mapped),
+  not just free-text ones to be absent; `classify_autonomy_ceiling()`
+  now returns `AutonomyClassification` (ceiling + the unmapped fields
+  list) instead of a bare int, since the list is what G2 will actually
+  need. Two more real bugs found in the same pass: Greenhouse's "provide
+  ONE of these" OR-groups (Resume/CV: file or text) were being flattened
+  into independent requirements (confirmed live on job 4466, both
+  `required=True`) — fixed by grouping required fields by label before
+  classifying; `cover_letter`/`cover_letter_text` were wrongly treated as
+  standard fields, letting a required cover letter (D18 fabrication-risk
+  category, confirmed real on job 7995153) silently pass. All fixes
+  confirmed via `AskUserQuestion` before implementation (Ashby scope,
+  the classification rule itself, and — this round — whether to map
+  eligibility-question labels now: held out, pending a real
+  identity.toml-lookup design). All three grounding jobs (2650, 4466,
+  410/7995153) re-verified live post-fix via the real CLI, matching the
+  plan exactly. 12 tests in `test_form_schema.py`, all built on real
+  captured Greenhouse response shapes, not synthetic fixtures.
+  Full suite 471/471 (up from 441), `ruff check`/`format --check` clean.
+  Next: no next task chosen, needs go-ahead. G2 (Playwright, dry-run) is
+  the natural next Phase G step but needs its own design pass, notably
+  the identity.toml-lookup logic this session deliberately deferred.
 
 - 2026-08-12, C4 follow-up (done, D37): Continuation of the D36
   investigation the user explicitly refused to let rest ("both recorded"
