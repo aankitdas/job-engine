@@ -3,82 +3,93 @@
 **Claude Code: read this file at the start of every session and update it at
 the end via `/checkpoint`. Do not rely on memory of previous sessions.**
 
-Last updated: 2026-08-17
-Current task: **D43: P4 (accept and log) built -- `ensure_reviewed()`
-now logs every still-missing required keyword to `gap_ledger` after
-`run_ladder()` exhausts, scoped to exactly what spec 08 says, no more.**
-Planned before any code per hard rule 7; real numbers gathered read-only
-first, three decisions made explicitly:
+Last updated: 2026-08-18
+Current task: **D45: all 10 stale `job_resume_variants` rows
+(rendered before a real `identity.toml` correction) invalidated and
+re-rendered for real, against the real `data/jobengine.db`, after a
+read-only-first plan and your explicit confirmation per hard rule 13.**
+7 deleted (nothing referenced them, `ensure_reviewed()` rebuilds them
+lazily on next visit); 3 re-rendered in place (jobs 3950/4109/4041,
+referenced by real `applications` rows 1/2/3).
 
-**Real numbers changed what this needed to be, not just informed it.**
-Of 623 real (job, profile) pairs passing every B3 filter + the relevance
-floor, 67 already have real extraction done; their pre-patch missing
-keywords (`measure.missing_keywords()`, per D29 a near-exact predictor
-of post-patch state) aggregated by distinct job count: `go` (16 jobs),
-`java` (12), `rust` (12), `typescript` (11), `sql` (8, data_scientist),
-`c++` (7), `react` (6) top the list. **These are not obscure long-tail
-infra terms -- they're mainstream languages `software_engineer`'s bank
-apparently has zero tagged coverage for at all**, and a single read-only
-script already made this legible from n=67 using one existing function.
-So P4's job wasn't discovery (already near-free); it's durability --
-turning this snapshot into a persistent signal across the full future
-population for M1's monthly review, which argued for the lightest
-possible build, confirmed by the numbers rather than assumed.
+**The problem was a real, visible, wrong claim on every rendered page,
+not a cosmetic diff.** `identity.toml`'s `work_authorization.statement`
+changed from a version implying no sponsorship would ever be needed to
+the accurate "On F1 OPT STEM." `render.py` prints this verbatim in
+every resume's header. Confirmed directly against the real file before
+touching anything: variant 1's actual PDF read `On F1 OPT STEM,
+Eligible to work in the US without sponsorship | TX` against the
+corrected `identity.toml`'s bare `"On F1 OPT STEM"`. All 10 real rows
+predated the fix.
 
-**(1) "Soft deficit" reuses D42's exact classification, but `accepted`
-itself is never auto-set by P4.** Spec 08's P4 text ("mark `accepted:
-true` if the deficit is soft") is the same sentence D42's
-`has_unrecoverable_rubric_failure()` already codifies -- reusing it, not
-a second judgment call. But P4 fires automatically inside
-`ensure_reviewed()`, before any human review; auto-writing
-`accepted=True` there would quietly pre-empt D42's whole point (a human
-must take a distinct second action to approve a known-failing resume).
-**P4 only writes to `gap_ledger`, never touches `review_status`/
-`accepted`** -- a deliberate, explicit divergence from spec 08's literal
-text, not a silent reinterpretation. Gap logging itself is unconditional
-on R001 pass/fail (a keyword can be individually missing even when
-overall coverage clears 0.70), not gated by the soft/hard split at all.
+**Decision 1: delete-and-defer for the 7 non-approved rows now, not a
+staleness-hash column.** First time `identity.toml` has ever changed in
+this project's real history -- a hash column would solve a problem
+observed once. The two future triggers you named aren't the same shape
+of risk either: identity changes are rare/manual/self-noticed; bank
+changes are more frequent and can change real keyword coverage, not
+just a header line, so a real mechanism worth building should cover
+both under one coherent hash -- a bigger design question than this
+data-fix should absorb on the side. Flagged as a real, deliberately-
+deferred follow-up.
 
-**(2) P4 fires in `orchestrate.ensure_reviewed()`, not inside
-`run_ladder()`** -- `run_ladder()` (`rubric/patch.py`) is deliberately
-pure (no `conn`, no `job_id`, reused by `test_patch.py`'s real-bank
-tests with no db in sight); `ensure_reviewed()` already does the
-parallel thing today (persists `job_resume_variant`/`rubric_results`
-from the ladder's result in one `conn`-having place before one
-`commit()`). `pipeline/batch.py` never calls either at all (D38), so
-the discriminator here is purity, not "reachable from batch" the way it
-was for D42's gate.
+**Decision 2 (confirmed by asking): the 3 approved rows are re-rendered
+in place, not deleted.** Not just a preference -- SQLite's `PRAGMA
+foreign_keys = ON` (every `connect()` call) makes deleting them
+literally impossible while `applications` references them, confirmed
+empirically against a scratch copy first: `DELETE FROM
+job_resume_variants WHERE id = 2` raised `FOREIGN KEY constraint
+failed` immediately. Asked whether the 3 should be refreshed or left
+frozen as a historical record; answer was refresh, since none of the 3
+have `submitted_at` set (all `NULL`) -- nothing marked submitted
+through this system yet, so correcting known-wrong content beats
+preserving it.
 
-**(3) `gap_ledger` accumulates one row per real (job, profile, keyword)
-occurrence, no dedup, no migration.** The schema as it already existed
-(`job_id NOT NULL`, no unique index) only supports this shape, and it's
-the only shape that answers the actual useful query ("uncovered
-keywords ranked by distinct job count" is `COUNT(DISTINCT job_id) ...
-GROUP BY profile, keyword`) -- deduping would make that query
-impossible without a redundant counter column. No new write-time guard
-needed: `ensure_reviewed()`'s existing idempotency already caps P4 at
-once per (job, profile).
+**A real gotcha caught by reading actual file paths before deleting
+anything, not assumed:** F1's dedup (D35) meant rows 1, 2, 4, 5, 8, 9
+all shared one physical file (job 3871's), and two of the three
+*approved* rows (2, 8) were among them -- deleting that file outright
+would have broken the surviving approved rows even though their db rows
+were untouched. Avoided by calling `patch.run_ladder()` directly for
+the 3 re-renders (bypassing `ensure_reviewed()`'s dedup-lookup), so each
+landed on its own fresh, independent file. No rendered files were
+deleted this session at all -- old, now-orphaned files under
+`variants/3902/`/`variants/4152/` are left on disk, same already-known
+clutter class D44 flagged for this directory.
 
-New: `GapLedgerRow` + `insert_gap_ledger_entries()` (`db/models.py`,
-mirrors `RubricResultRow`); one new block in `ensure_reviewed()`, same
-site as the existing `insert_rubric_results()` call. No schema change.
-6 new tests, tests-first. Full suite 496/496 (up from 491), `ruff
-check`/`format --check` clean. **Verified against a real, production-
-shaped scratch copy of the real db** (never the real path, hard rule
-13): `ensure_reviewed()` against job 2181 (Stripe "Software Engineer"),
-real bank/config, fake client with `required_keywords=["Go", "Rust"]`
-(pulled directly from the real gap-frequency table above) -- real
-result, `gap_ledger` gained exactly the 2 expected rows. Scratch copy
-deleted after. See D43 in docs/decisions.md for the complete writeup.
+**Run for real, with the real local model, not a stand-in:** Ollama was
+reachable this session via the configured `OLLAMA_BASE_URL`; all three
+re-renders genuinely re-attempted P3 against the real model, same as
+the originals. All three came back with `selection_hash` byte-identical
+to their pre-fix value and identical score/coverage/`passed`/
+`patch_tiers_applied` -- confirming, not just assuming, that
+`identity.toml` content has zero influence on P0-P3's keyword-driven
+selection, only on the rendered header. Verified after commit, not just
+planned: `job_resume_variants` count is 3, `applications` count
+unchanged at 3, `PRAGMA foreign_key_check` returns `[]`, and all three
+new PDFs' first-page text reads `On F1 OPT STEM | TX`, confirmed by
+direct `pdfplumber` extraction. A full backup of the real db was taken
+to the scratchpad directory before any write, beyond the transaction
+itself. `gap_ledger` (19 rows) and `jobs` were unaffected, as expected.
+Full suite re-run after (no source changed): 499/499, ruff clean. See
+D45 in docs/decisions.md for the complete writeup, including why the 4
+equally-stale `base_resumes` rows were deliberately left out of this
+session's scope (no FK entanglement, spec 09 already expects a new
+version rather than an overwrite).
 
 Next: no next task chosen yet, needs your go-ahead. Candidates, now
-informed by D41/D42/D43: G2 itself, the Ashby-ceiling gap, wiring a
-real `autonomy_level` into `approve()` (deliberately deferred, D42
-decision 3), a small gap_ledger query/report surface for M1 (explicitly
-not built this session, flagged as a possible small follow-on), or
-B3-followup/F2/F3. D40, D41, D42 (docs + all code) were committed
-together last session (`6ef7eb1`); **D43 (docs + code) is not yet
-committed** -- confirm before committing/pushing.
+informed by D41-D45: G2 itself, the Ashby-ceiling gap, wiring a real
+`autonomy_level` into `approve()` (deliberately deferred, D42 decision
+3), the approve()-called-twice guard (D44), an autonomy-ceiling display
+on the approved-state view (D44), regenerating the 4 stale
+`base_resumes` (D45), a small gap_ledger query/report surface for M1,
+a real staleness-hash mechanism if this recurs (D45 decision 1), or
+B3-followup/F2/F3. D40-D43 (docs + all code) are committed (`8cccb16`,
+`6ef7eb1`, `72974fe`); **D44 (docs + code) is still not yet
+committed**, alongside D45's own docs write-up (D45 itself has no
+source code to commit -- it was a real, already-executed data operation
+against `data/jobengine.db`, not a code change) -- confirm before
+committing/pushing.
 
 Separately: **B2's Task Scheduler regression is now confirmed fixed, not
 just a positive sign.** Last checkpoint had one real unattended firing
@@ -460,33 +471,46 @@ HTML, no JS, per spec: reviewing means seeing the already-patched
 candidate and deciding, not editing bullet text in a browser;
 `queue_detail.html` links `variant.docx_path` for download next to the
 existing inline PDF embed, `_resume_static_url()` reused for both, no
-longer PDF-specific despite the name; new this checkpoint, D42: the
-previously-unconditional Approve button is now three mutually exclusive
-states -- a passing variant gets the plain Approve form; a soft (R001-
-only) failure gets an amber warning banner plus a distinct "Approve
-anyway" form carrying a hidden `override_soft_failure=true` field; a
-hard failure gets an explanatory banner and no approve form at all,
-Reject stays available in every state).
+longer PDF-specific despite the name; the previously-unconditional
+Approve button is three mutually exclusive states (D42) -- a passing
+variant gets the plain Approve form; a soft (R001-only) failure gets an
+amber warning banner plus a distinct "Approve anyway" form carrying a
+hidden `override_soft_failure=true` field; a hard failure gets an
+explanatory banner and no approve form at all; new this checkpoint,
+D44: a fourth state, `variant.review_status == 'approved'`, replaces
+all three action forms with a confirmation banner ("Submission is
+manual today") plus a link to `job.apply_url` when set -- Reject stays
+available for `pending`/that hard-fail state, but not once approved,
+since D44 found nothing previously stopped a re-approve from creating a
+second `applications` row for the same variant, see Known Issues).
+`approve()`'s success redirect changed this checkpoint from `/` to
+`/jobs/{job_id}/{profile}`, D44: an approved job disappears from both
+`GET /` sections (`list_pending_review_queue()`'s `WHERE review_status
+= 'pending'`, `list_existing_variant_pairs()`'s any-status exclusion
+from "not yet reviewed"), so `/` was a dead end with no path back to
+the apply URL/resume the reviewer just earned; `reject()`'s own
+redirect to `/` is unchanged, that vanishing act is deliberate (D35).
 `JOBENGINE_DB_PATH` env var overrides `DEFAULT_DB_PATH` for manual
 testing against a scratch copy. `_LIST_WINDOW_DAYS` now imports
 `pipeline/batch.py`'s `WINDOW_DAYS` (D38) instead of hardcoding its own
 copy. `uv run uvicorn jobengine.web.app:app --reload` (CLAUDE.md's
-already-documented dev command). Tests: `test_web_app.py`, 17 tests
-(count re-verified live at this checkpoint, not carried forward from an
-earlier session's stale tally), covering first-visit trigger,
-second-visit idempotency, approve/reject state transitions and their
-`applications`-row side effects, the list page dropping a rejected job,
-`_new_pairs()`'s `passes_all_filters()` gating (a clean untriggered job
-appears as "not yet reviewed," one with a non-US location does not),
+already-documented dev command). Tests: `test_web_app.py`, 20 tests (up
+from 17, +3 this checkpoint for D44's redirect target and the new
+approved-state branch, one on each side: content present once approved,
+absent before), covering first-visit trigger, second-visit idempotency,
+approve/reject state transitions and their `applications`-row side
+effects, the list page dropping a rejected job, `_new_pairs()`'s
+`passes_all_filters()` gating (a clean untriggered job appears as "not
+yet reviewed," one with a non-US location does not),
 `passes_relevance_floor()` gating (a job scored below the floor is
 omitted, one at or above it appears, an unscored job still appears --
-fails open), and, new this checkpoint (D42): the approve-gate's three
-states (without-override 409 on a soft failure, with-override succeeds
-and sets `accepted=True`, the detail page shows the "Approve anyway"
-button for a soft failure and no approve form at all for a hard one).
+fails open), and the approve-gate's three rubric states (D42:
+without-override 409 on a soft failure, with-override succeeds and sets
+`accepted=True`, the detail page shows the right button for each).
 `_seed_job()`'s default `first_seen_at` is relative to `now` rather
 than a fixed literal date, avoiding the 7-day-window staleness a fixed
-date would eventually cause.
+date would eventually cause; gained an optional `apply_url` kwarg this
+checkpoint (default `None`, every existing call site unaffected).
 
 **apply/** (`src/jobengine/apply/`, new this checkpoint, G1): `form_schema.py`
 — `FormField`/`FormSchema`/`ApplyConfig`/`AutonomyClassification`
@@ -513,12 +537,27 @@ minimal fixtures.
 
 **resume/rendered/variants/** (new this session, F1): per-(job,profile)
 lazily-rendered candidates, `{job_id}/{profile}/candidate_{tiers}.
-{docx,pdf}`. One real entry as of this checkpoint:
-`3871/software_engineer/candidate_P0_P1_P2_P3.{docx,pdf}` (this
-session's real worked-example verification, see below).
+{docx,pdf}`. 12 real entries as of this checkpoint (up from 1), one per
+distinct `job_resume_variant` row plus its dedup-shared partner (D35).
+**New known issue, found while checkpointing, not fixed:**
+`_VARIANTS_OUT_ROOT` (`queue/orchestrate.py`) is a hardcoded relative
+path, not derived from or scoped to whichever db `QueueContext.conn`
+actually points at -- every test that exercises `ensure_reviewed()`
+(`test_queue_orchestrate.py`, `test_web_app.py`) writes real render
+files into this real directory using the test's small auto-increment
+job ids, regardless of using a `tmp_path` db. Confirmed live:
+`variants/1/` and `variants/2/` on disk date to 2026-08-07 (F1's own
+first session) and are test byproducts, not real job 1/2 data (no job
+that small exists in the real db); this session's own scratch-db
+verification runs (D43, D44) added a real `variants/2181/` entry the
+same way, for the same reason. Harmless (never read back by anything
+that matters, the real `job_resume_variants` rows are the actual source
+of truth) but real disk clutter accumulating every test run since
+F1 shipped; worth scoping the output root into `QueueContext` (or a
+test fixture override) if it ever needs cleaning up for real.
 
-**Full suite: 496/496 passing (up from 491 at last checkpoint, +5 this
-checkpoint for D43), `ruff check src/ tests/` clean, `ruff format
+**Full suite: 499/499 passing (up from 496 at last checkpoint, +3 this
+checkpoint for D44), `ruff check src/ tests/` clean, `ruff format
 --check` clean on every file this checkpoint touched** (the
 pre-existing `RUF059`-adjacent formatting-only diffs in `test_db.py`/
 `test_db_migrate.py`/`test_profiles_brief.py`/`test_render.py`/
@@ -527,30 +566,27 @@ checkpoint's own edits, confirmed by only running `ruff format` against
 the specific files this checkpoint changed rather than the whole tree).
 
 **`data/jobengine.db` real accumulated state, verified this
-checkpoint:** 15 companies (unchanged), 4682 jobs (up from 4505 — 3 more
-real `sync` firings, `runs` id 31-33, none triggered by this session's
-own work; note a real gap with no `sync` firing between 08-14T04:47 and
-08-17T03:35, not investigated this checkpoint since D40 was the focus,
-worth a look if it recurs), 33 `runs` rows total (28 `sync`, 3
-`relevance` [the manual CLI], 2 `daily_batch` — ids 23 and 30, D38;
-`daily_batch` has not run again since id 30 on 08-16, so `relevance_scores`/
-`job_analysis`/`keyword_corpus` are all unchanged since last checkpoint,
-not a regression, just nothing has triggered a new run), `relevance_scores`
-1029 rows/951 distinct jobs (unchanged), `job_analysis` 90 rows/79
-distinct jobs (unchanged), `keyword_corpus` 219 rows (unchanged),
-`job_resume_variants` 2/`rubric_results` 2 (unchanged since D41: job
-3950's variant, sharing job 3871's `selection_hash`/rendered files per
-F1's dedup, D35), `applications` 1 (unchanged since D41: the first real
-`applications` row this project has ever written outside a test, id 1,
-job 3950, `autonomy_level=0 status='queued'`, still `review_status=
-'approved'`/`accepted=NULL` from before D42's gate existed), `gap_ledger`
-**still 0 rows in the real db** -- D43's verification deliberately ran
-against a scratch copy only (per hard rule 13), never the real path, so
-the real `gap_ledger` stays empty until a real `ensure_reviewed()` call
-against a job with a genuine coverage gap happens for real (very likely
-soon given D42's own 66/67 number: the next real `/jobs/{id}/{profile}`
-visit on almost any untriggered pair will populate it), 4 `base_resumes`
-rows (unchanged). `daily_cap`
+checkpoint, including this session's own real D45 write:** 15 companies
+(unchanged), 4685 jobs (up from 4682 -- a real `sync` firing happened
+during this session, not from anything this session did), 33 `runs`
+rows (unchanged, that sync firing didn't add a new row by the time this
+was checked -- worth a glance next checkpoint if `runs` still reads 33),
+`relevance_scores` 1029 rows/951 distinct jobs (unchanged), `job_analysis`
+91 rows (unchanged), `keyword_corpus` 220 rows (unchanged),
+`job_resume_variants` **3** (down from 10 -- D45: 7 stale rows deleted
+for real, ids 1/3/4/5/6/7/9), `rubric_results` **3** (down from 10, same
+cause, children deleted before parents), `applications` 3 (unchanged --
+D45 touched none of them, by design: rows 2/8/10 were re-rendered in
+place, same ids, same `applications.resume_variant_id` values, `PRAGMA
+foreign_key_check` confirmed clean post-write), `gap_ledger` 19 rows
+(unchanged -- keys on `job_id`, not `job_resume_variant_id`, so
+deleting/re-rendering variants doesn't touch it), 4 `base_resumes` rows
+(unchanged, and now the known-next-stale artifact: same identity-line
+issue D45 just fixed for variants, not yet regenerated, flagged not
+fixed, see D45). All three surviving `job_resume_variants` rows (2, 8,
+10) now render `On F1 OPT STEM | TX` in their real PDF headers,
+confirmed by direct extraction, not the pre-fix sponsorship claim.
+`daily_cap`
 is still `null`; `min_relevance_score: 20` (D37) remains the only live
 relevance-score gate on `web/app.py`'s `_new_pairs()`; D40's seniority
 exclusion is a second, independent gate upstream of it, in
@@ -565,6 +601,70 @@ B3 filter + the relevance floor): **293 of those (51.1%) are
 
 ## Known issues and deferred work
 
+- **RESOLVED this checkpoint (D45), not still open:** all 10 real
+  `job_resume_variants` rows were rendered before a real `identity.toml`
+  correction and carried a wrong, visible work-authorization claim on
+  every page. 7 deleted for real (nothing referenced them,
+  `ensure_reviewed()` rebuilds lazily); 3 re-rendered in place for real
+  (FK-referenced by real `applications` rows, confirmed by asking that
+  refresh-in-place was wanted over leaving them frozen). Full real-data
+  writeup, including why deletion of the 3 was literally impossible
+  (not just undesirable) under SQLite's enforced foreign keys: D45,
+  docs/decisions.md.
+- **New this checkpoint (D45), not fixed:** the 4 `base_resumes` rows
+  have the exact same stale-identity-line problem D45 just fixed for
+  `job_resume_variants`, deliberately left untouched this session (no
+  FK entanglement forcing an immediate decision, and spec 09's own
+  versioning already expects a new version rather than an overwrite --
+  `persist_base_resume()`, E2, already built and tested). Regenerate
+  when convenient; nothing else reads these files at request time
+  (`ensure_reviewed()` builds each job's candidate fresh from
+  `select_for_profile()`, not from a stored base resume), so this is
+  lower-urgency than the variants were, not urgent-and-ignored.
+- **New this checkpoint (D45), deliberately deferred, not forgotten:** a
+  real identity/bank-content staleness-hash mechanism on
+  `job_resume_variants` (so `ensure_reviewed()` could detect and
+  auto-refresh a stale row instead of treating "row exists" as
+  sufficient) was considered and explicitly declined for now -- this is
+  the first time `identity.toml` has changed in the project's real
+  history, and a mechanism worth building should probably cover bank
+  content changes too (a materially bigger design question: hash the
+  whole bank file, or only the bullets actually selected?). Revisit if
+  a manual fix like D45 becomes recurring toil, not preemptively.
+- **RESOLVED this checkpoint (D44), not still open:** an approved job
+  used to redirect to `/` and become unreachable from either `GET /`
+  section (`list_pending_review_queue()`'s `WHERE review_status =
+  'pending'`; `list_existing_variant_pairs()`'s any-status exclusion
+  from "not yet reviewed"), stranding the reviewer with no path back to
+  `job.apply_url`/the rendered `.docx` -- both already existed, just on
+  the page they'd just been redirected away from. Fixed: `approve()`
+  redirects to the detail page instead, which grows a fourth,
+  `review_status == 'approved'` state (confirmation banner + apply link,
+  all three action forms hidden). `reject()`'s own redirect to `/` is
+  unchanged -- that vanishing act is deliberate (D35), not the same bug.
+- **New this checkpoint (D44), not fixed:** `orchestrate.approve()`/
+  `insert_application()` have no guard against firing twice for the
+  same variant -- no `UNIQUE(resume_variant_id)` on `applications`, no
+  existing-row check in either function. The UI can no longer trigger
+  this for a human (D44 hides the Approve form once `review_status ==
+  'approved'`), but a future automated path (G3/G4) calling `approve()`
+  more than once would silently create duplicate `applications` rows.
+  Revisit with a real guard (`INSERT OR IGNORE` + a unique index, or an
+  explicit check in `approve()`) before anything automated calls it.
+- **Flagged, not built, this checkpoint (D44): G1's autonomy ceiling and
+  `unmapped_required_fields` would be genuinely useful on the approved-
+  state confirmation view** (it answers "which fields will I have to
+  fill by hand"), deliberately kept separate from D44's own minimal
+  change for four concrete reasons: it'd be the first live external
+  network call (Greenhouse) on an otherwise fully local, fast page; it's
+  async with no existing sync-to-async bridge in `web/app.py`; Ashby
+  (~51% of the real approvable queue, D41) has no answer at all (D39)
+  and would need its own UI branch; and `QueueContext` doesn't carry an
+  `ApplyConfig` today. The live-fetch-at-render-time shape itself is
+  correct (D42 decision 3 already declined to persist the ceiling
+  anywhere) -- a real follow-up, scoped to the approved-state view
+  specifically, Greenhouse-only per D39, with an explicit "not available
+  for Ashby" branch, not a silent gap.
 - **RESOLVED this checkpoint (D42), not still open:** D41 found
   `orchestrate.approve()` and its web route never checked
   `variant.passed` -- a real job (3950) with a real R001 hard failure
@@ -1688,6 +1788,93 @@ B3 filter + the relevance floor): **293 of those (51.1%) are
 ## Session log
 
 (Newest first. Date, task id, what changed, what to do next.)
+
+- 2026-08-18, D45 (done): Real data operation against
+  `data/jobengine.db`, planned read-only first, executed only after
+  explicit confirmation per hard rule 13. `identity.toml`'s
+  work-authorization line was corrected (no longer implies no
+  sponsorship ever needed); all 10 real `job_resume_variants` rows
+  predated the fix and carried the wrong claim on every rendered page,
+  confirmed directly against a real PDF before doing anything.
+  Two decisions: (1) delete-and-defer for the 7 non-approved rows, not
+  a staleness-hash column -- first time this has ever happened, and a
+  real mechanism should probably cover bank-content staleness too,
+  which is a bigger design question than this fix should absorb;
+  flagged as a deliberate future item, not built. (2) the 3 approved
+  rows (referenced by real `applications` rows) can't be deleted at all
+  -- confirmed empirically first, `PRAGMA foreign_keys = ON` makes
+  SQLite reject it outright -- so asked directly whether to refresh
+  them in place or leave them frozen; answer was refresh, since none
+  have `submitted_at` set.
+  Caught a real gotcha before deleting anything: F1's dedup meant two
+  of the three approved rows shared a physical file with rows being
+  deleted -- avoided by calling `run_ladder()` directly for the
+  re-renders (bypassing the dedup lookup), landing each on its own
+  fresh file.
+  Executed for real: backed up the real db to scratchpad first; deleted
+  `rubric_results` then `job_resume_variants` for the 7 (children before
+  parents, matching the FK direction); re-rendered the 3 with the real
+  local model (Ollama reachable this session via `OLLAMA_BASE_URL`) and
+  `UPDATE`d each row in place by id. All 3 came back with byte-identical
+  `selection_hash`/score/coverage/`passed` to before -- confirms
+  `identity.toml` only affects the header, never P0-P3's keyword logic.
+  Verified after commit: `job_resume_variants`/`rubric_results` count 3,
+  `applications` still 3 and all FKs resolve, `PRAGMA foreign_key_check`
+  clean, all 3 new PDFs read the corrected line via direct `pdfplumber`
+  extraction. `gap_ledger`/`jobs` unaffected as expected. Full suite
+  re-run after (no source changed): 499/499. Full writeup: D45,
+  docs/decisions.md.
+  Next: no next task chosen. The 4 `base_resumes` rows have the same
+  staleness, deliberately left for a future pass (flagged, not urgent --
+  nothing reads them at request time). Other candidates unchanged from
+  last checkpoint's list. D44 (docs + code) is still uncommitted; D45
+  has no source code, only its docs/decisions.md writeup and this
+  checkpoint to commit -- confirm before committing/pushing either.
+
+- 2026-08-18, D44 (done): Approving a job used to redirect to `/` and
+  strand the reviewer -- both `GET /` sections exclude any reviewed
+  variant, so the approved job vanished with no path back to
+  `job.apply_url`/the resume. Fixed by redirecting to the same detail
+  page instead of a new route (every needed field was already in
+  context: `job.apply_url` existed unrendered, `docx_url` already
+  rendered, `variant.review_status` already passed but never branched
+  on) -- one redirect-target line in `approve()`, one new template
+  branch hiding all three action forms once approved. Explicitly kept
+  G1's autonomy ceiling out of scope: live Greenhouse fetch (new
+  external dependency + async bridge `web/app.py` doesn't have), Ashby
+  has no answer at all (D39, ~51% of the queue per D41), `QueueContext`
+  has no `ApplyConfig`. Recommended, not built, as a follow-up scoped to
+  the approved view specifically. Found and flagged, not fixed:
+  `approve()` has no guard against firing twice for the same variant
+  (no unique constraint, no existing-row check) -- harmless for a human
+  today since the button disappears once approved, real risk for a
+  future automated caller.
+  3 new tests (not the planned 4 -- both approve() success paths share
+  one redirect line, so a second near-identical test added nothing).
+  Full suite 499/499, ruff clean. Verified through the real FastAPI app
+  via `TestClient` against a scratch copy of the real db (never the
+  real path): real job 2181 (Stripe), full GET -> approve -> GET cycle,
+  confirmed the apply link/docx/manual-copy render and both action forms
+  are gone, reload is idempotent.
+  **Real, unplanned finding surfaced while running that check:** the
+  real `data/jobengine.db` had moved on substantially since D43's own
+  checkpoint from real usage between sessions, not this session's work
+  -- `applications` 1 -> 3 (jobs 4109 and 4041 approved for real, both
+  via D42's "approve anyway" override), `job_resume_variants` 2 -> 10 (8
+  more real jobs reviewed), `gap_ledger` 0 -> 19 real rows across 8
+  distinct jobs (D43's P4 confirmed working in real production use, not
+  just tests). All real numbers re-verified live and recorded in "what
+  exists," not left stale. Also found, not fixed: every test that calls
+  `ensure_reviewed()` writes real files into the real
+  `resume/rendered/variants/` directory regardless of using a `tmp_path`
+  db (`_VARIANTS_OUT_ROOT` is hardcoded, not scoped to the test db) --
+  pre-existing since F1, not introduced this session, harmless but real
+  disk clutter.
+  Full writeup: D44, docs/decisions.md.
+  Next: no next task chosen. Candidates: G2, the Ashby-ceiling gap, the
+  approve()-called-twice guard, the ceiling-on-approved-view follow-up,
+  a gap_ledger query surface for M1, or B3-followup/F2/F3. D44 (docs +
+  code) not yet committed -- confirm before committing/pushing.
 
 - 2026-08-17, D43 (done): Built P4 (accept and log), scoped to exactly
   spec 08's text after checking the real numbers first. Read-only

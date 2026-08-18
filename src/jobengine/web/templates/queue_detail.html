@@ -58,6 +58,16 @@
   <p><a href="{{ docx_url }}" download>Download .docx</a></p>
   {% endif %}
 
+  {% if variant.review_status == 'approved' %}
+  <div class="banner pass">
+    <strong>Approved.</strong> Submission is manual today &mdash; open the
+    apply link below and use the resume above.
+  </div>
+  {% if job.apply_url %}
+  <h3>Apply</h3>
+  <p><a href="{{ job.apply_url }}">{{ job.apply_url }}</a></p>
+  {% endif %}
+  {% else %}
   {% if needs_override %}
   <div class="banner override">
     This resume does not meet the coverage bar (R001) but the deficit is
@@ -84,6 +94,7 @@
     <input type="hidden" name="override_soft_failure" value="true">
     <button type="submit" class="approve-anyway">Approve anyway</button>
   </form>
+  {% endif %}
   {% endif %}
 </body>
 </html>

@@ -2282,3 +2282,218 @@ coverage=0.0`, and `gap_ledger` gained exactly 2 real rows,
 schema and bank content, not only a freshly-`init()`'d test db. Scratch
 copy deleted after verification; the real `data/jobengine.db` was never
 opened for write.
+
+---
+
+**D44. `approve()` now redirects back to `/jobs/{job_id}/{profile}`
+instead of `/`, and that page grows a fourth state (approved: apply URL
++ manual-submission notice, both action forms hidden) so an approved job
+stays reachable with what's actually needed to apply next, instead of
+vanishing from every list the moment it's approved.**
+
+**The problem was real, not hypothetical.** `list_pending_review_queue()`
+only returns `review_status='pending'`; `list_existing_variant_pairs()`
+excludes any pair with a variant, any status, from "not yet reviewed."
+An approved job was therefore unreachable from `GET /` in either
+section the instant it was approved, and the old redirect to `/` sent
+the reviewer straight to that dead end -- with no path back to
+`job.apply_url` or the rendered `.docx`, both of which already existed,
+just on the page they'd been redirected away from.
+
+**Decision: reuse the existing detail page, not a new confirmation
+route.** Every piece of context the confirmation needs was already in
+scope on `GET /jobs/{job_id}/{profile}` -- `job` (carries `apply_url`,
+a field that already existed on the `Job` model and was simply never
+rendered), `docx_url` (already computed, already rendered
+unconditionally), and `variant.review_status` (already on the object
+passed to the template, just never branched on -- the template
+previously showed Approve/Reject regardless of status, so reloading an
+already-approved job's page still offered to approve it again). A
+dedicated route would have duplicated that exact fetching for no
+benefit, and reusing the same URL is what actually satisfies "stays
+reachable": nothing new to bookmark, the link that got you here keeps
+working. Net change: `approve()`'s redirect target
+(`web/app.py`), plus one new `{% if variant.review_status == 'approved'
+%}` branch in `queue_detail.html` that shows the apply link (only when
+`job.apply_url` is set, same guarded pattern the `pdf_url`/`docx_url`
+blocks already use) and wraps the existing Reject/Approve/"Approve
+anyway" forms so a settled approval stops offering either action again.
+`reject()`'s own redirect to `/` is untouched -- D35's "a rejected job
+drops off the list" is a deliberate, different, correct behavior this
+change didn't touch.
+
+**Found while implementing, not fixed, flagged for visibility:**
+`orchestrate.approve()`/`insert_application()` have no guard against
+being invoked twice for the same variant -- nothing enforces
+`UNIQUE(resume_variant_id)` on `applications`, and neither function
+checks for an existing row first. Today's UI can no longer trigger this
+for a human (the button disappears once approved), but a future
+automated path (G3/G4) calling `approve()` more than once would create
+duplicate `applications` rows silently. Not fixed here, since this
+change's own UI fix already closes the one path that could hit it
+today; worth a real guard (`INSERT OR IGNORE` plus a unique index, or an
+explicit idempotency check in `approve()`) before anything automated
+calls it.
+
+**Decision: G1's autonomy ceiling and `unmapped_required_fields` stay
+out of this change, kept separate, for four concrete reasons rather
+than "different feature":** (1) `fetch_greenhouse_form_schema()` is a
+live, unauthenticated GET against Greenhouse -- real latency, real
+failure modes, on a page where everything else is local and fast (D35
+measured a second detail-page visit at 0.01s, zero new calls; a live
+external fetch would end that property on every future visit, not just
+once). (2) It's async; every existing async call in this codebase
+routes through `orchestrate.py`'s own `asyncio.run()` wrapping --
+`web/app.py` has no direct async-to-sync bridge today. (3) Ashby has no
+answer at all (D39); ~51% of the real approvable queue is Ashby (D41),
+so the template would need a real "ceiling unknown" branch, a second
+new UI state this change has no other reason to grow. (4)
+`classify_autonomy_ceiling()` needs `ApplyConfig`
+(`load_apply_config()`), which `QueueContext` doesn't carry today --
+small, but new plumbing, not reuse. The live-fetch-at-render-time shape
+itself is correct, not a wrong guess -- D42 (decision 3) already
+declined to persist the ceiling anywhere, so a live fetch is the only
+shape available without a separate schema/design pass. Recommended,
+not built: a real follow-up scoped specifically to the approved-state
+view (the one moment the ceiling is actually decision-relevant),
+Greenhouse-only per D39, with an explicit "not available for Ashby"
+branch rather than a silent gap.
+
+**Tests first (hard rule 7), `tests/test_web_app.py`:** `_seed_job()`
+gained an optional `apply_url` kwarg (default `None`, every existing
+call site unaffected). 3 new tests, not 4 -- the plan called for a
+separate redirect-target test on the plain-pass path and the
+override-soft-failure path, but implementation surfaced that both
+success cases share one `return RedirectResponse(...)` line in
+`approve()`, so a second near-identical test would have covered nothing
+new; consolidated to one redirect-target test (via the override path,
+this file's only failing-fixture convention) plus the confirmation-
+content test and a pending-state regression guard (the new block must
+NOT leak before approval). Full suite 499/499 (up from 496), `ruff
+check`/`format --check` clean.
+
+**Verified against a real, production-shaped scratch copy of the real
+db (never the real path, hard rule 13), through the actual FastAPI app
+via `TestClient`, not just the automated suite:** real job 2181
+(Stripe, real `apply_url`), fake LLM client, full GET -> POST approve
+(with override) -> GET cycle. Confirmed live: pre-approval page still
+shows the Approve form; post-approval page shows the real Stripe apply
+URL, the "manual" copy, the working `.docx` download link, and neither
+action form; a second reload is byte-identical (idempotent, no new
+`applications` row). **Incidental real finding, not caused by this
+change:** the scratch copy (freshly copied from the real db moments
+before) already carried 3 real `applications` rows and 10 real
+`job_resume_variants`, not the 1/2 this session's own D43 checkpoint
+last recorded -- real usage of the actual running app happened for real
+against `data/jobengine.db` between sessions (jobs 4109 and 4041, in
+addition to 3950), confirmed by reading the real db directly,
+read-only, after the scratch check. Recorded in this checkpoint's
+"what exists" numbers, not left stale.
+
+---
+
+**D45. All 10 stale `job_resume_variants` rows (rendered before a real
+`identity.toml` correction) invalidated and re-rendered for real,
+against the real `data/jobengine.db`, after a read-only-first plan and
+your explicit confirmation per hard rule 13 -- 7 deleted and left for
+`ensure_reviewed()` to rebuild lazily, 3 re-rendered in place because
+they're referenced by real `applications` rows.**
+
+**The problem was a real, visible, wrong claim on every rendered page,
+not a cosmetic diff.** `identity.toml`'s `work_authorization.statement`
+changed from a version implying no sponsorship would ever be needed to
+the accurate "On F1 OPT STEM" (F-1 OPT STEM eventually needs H-1B).
+`render.py`'s `_add_status_line()` prints this verbatim in every
+resume's header. Confirmed directly against the real file for variant 1
+(job 3871) before touching anything: the actual PDF read `On F1 OPT
+STEM, Eligible to work in the US without sponsorship | TX` against the
+corrected `identity.toml`'s bare `"On F1 OPT STEM"`. All 10 real rows
+predated the fix.
+
+**Decision 1: delete-and-defer for the 7 non-approved rows, not a
+staleness-hash column, at least for now.** This is the first time in
+the project's real history `identity.toml` has changed at all -- a hash
+column would be built to solve a problem observed once. The two future
+triggers named (`identity.toml`, the bank) aren't actually the same
+shape of risk: identity changes are rare, manual, made by the one
+person who'd immediately know to trigger a refresh; bank content
+changes are more frequent *and* riskier to leave silently stale (they
+can change real keyword coverage, not just a header line), so a real
+mechanism worth building should cover both under one coherent hash --
+a bigger design question (hash the whole bank file? only the selected
+bullets?) than a data-fix should absorb on the side. Flagged as a real,
+deliberately-deferred follow-up, not silently dropped -- revisit if
+manual fixes like this one become recurring toil, not preemptively.
+
+**Decision 2: the 3 approved rows (jobs 3950/4109/4041, referenced by
+real `applications` rows 1/2/3) are re-rendered in place, not deleted,
+confirmed by asking rather than assumed.** Two independent reasons this
+had to be a real question, not a default: (a) SQLite's `PRAGMA
+foreign_keys = ON` (set in every `connect()` call) makes deleting them
+literally impossible while `applications` references them -- confirmed
+empirically against a scratch copy before proposing anything, not
+asserted: `DELETE FROM job_resume_variants WHERE id = 2` raised
+`FOREIGN KEY constraint failed` immediately; (b) even if it were
+technically possible, these are real approval decisions, and "delete
+and let it rebuild" would silently orphan the `applications` rows that
+record them. Asked directly whether the 3 should be refreshed in place
+or left frozen as a historical record of what was actually reviewed;
+answer was refresh in place, since none of the 3 have `submitted_at`
+set (`NULL` on all three -- nothing marked submitted through this
+system), so correcting known-wrong content beats preserving it.
+
+**Mechanism, and a real gotcha caught by reading actual file paths, not
+assumed:** re-rendering called `patch.run_ladder()` directly (the same
+function `ensure_reviewed()` already calls) with each row's real,
+already-extracted `job_analysis.required_keywords`/
+`preferred_keywords`, then `UPDATE`d the existing row's `docx_path`,
+`pdf_path`, `score`, `coverage`, `front_load`, `passed`,
+`patch_tiers_applied`, `bullet_ids`, `selection_hash` in place by `id`
+-- never delete+insert, so `applications.resume_variant_id` never
+needed to change. F1's dedup (D35) meant rows 1, 2, 4, 5, 8, 9 all
+shared one physical file (job 3871's) before this ran, and two of the
+three approved rows (2, 8) were among them -- deleting that file
+outright (a first-draft instinct) would have broken the surviving
+approved rows even though their *db rows* were never touched. Avoided
+entirely by calling `run_ladder()` directly rather than going through
+`ensure_reviewed()`'s dedup-lookup path: each of the 3 rendered to its
+own fresh, independent file under `resume/rendered/variants/{job_id}/
+{profile}/`, so no shared file was ever at risk. No rendered files were
+deleted at all this session -- the old, now fully-orphaned files under
+`variants/3902/` and `variants/4152/` are left on disk, same
+already-known, harmless clutter class D44 already flagged for this
+directory (`_VARIANTS_OUT_ROOT` not scoped per-run).
+
+**Run for real against the real db, with the real local model, not a
+stand-in.** Ollama was reachable this session via the configured
+`OLLAMA_BASE_URL` (confirmed live, `qwen3.5:9b-q4_K_M` present) -- no
+fake client, no shortcut; all three re-renders genuinely re-attempted
+P3 against the real model, same as the original renders. All three
+came back with `selection_hash` byte-identical to their pre-fix value,
+confirming what D29 already implied but this run verified rather than
+assumed: `identity.toml` content has zero influence on P0-P3's
+keyword-driven selection logic, only on the rendered header. Score,
+coverage, `passed`, and `patch_tiers_applied` are also unchanged for
+all three -- the only thing that changed is the header line and the
+file bytes.
+
+**Verified before and after, not just planned:** captured full
+before-state for rows 2/8/10 before running anything; after commit,
+`job_resume_variants` count is 3, `rubric_results` count is 3,
+`applications` count is unchanged at 3, `PRAGMA foreign_key_check`
+returns clean (`[]`), and all three new PDFs' first-page text reads
+`On F1 OPT STEM | TX`, confirmed by direct `pdfplumber` extraction, not
+assumed from the code path alone. A full backup of the real db was
+taken to the scratchpad directory before any write, as an extra safety
+net beyond the transaction itself (same precedent as the D22/D23
+addendum backfill). `gap_ledger` (19 rows) and `jobs` were unaffected,
+as expected -- `gap_ledger` keys on `job_id` directly, not
+`job_resume_variant_id`, and nothing about coverage/keyword math
+depends on `identity.toml`.
+
+**Adjacent, same root cause, explicitly out of scope this session:**
+the 4 `base_resumes` rows were rendered the same way and are equally
+stale, but have no `applications`/FK entanglement and spec 09's own
+versioning already expects a new version rather than an overwrite
+(`persist_base_resume()`, E2). Flagged, not touched -- revisit
+separately if/when regenerating them is wanted.

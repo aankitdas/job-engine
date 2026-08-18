@@ -77,6 +77,7 @@ def _seed_job(
     description="Requirements:\n- Go\n",
     location_raw="San Francisco, CA",
     first_seen_at=None,
+    apply_url=None,
 ) -> int:
     # Relative to "now" (1 day old), not a hardcoded literal: several
     # tests below assert a job appears in GET /'s _LIST_WINDOW_DAYS
@@ -95,6 +96,7 @@ def _seed_job(
             title=title,
             description=description,
             location_raw=location_raw,
+            apply_url=apply_url,
             raw_json="{}",
             first_seen_at=first_seen_at,
             last_seen_at=first_seen_at,
@@ -452,6 +454,65 @@ def test_detail_page_shows_approve_anyway_button_for_a_soft_failure(
 
     assert "override_soft_failure" in response.text
     assert "approve anyway" in response.text.lower()
+
+
+# --- D44: approve() redirects back to the detail page, not "/", so the
+# approved job stays reachable with its apply URL and resume in hand
+# instead of vanishing from both list sections. See docs/decisions.md
+# D44. Reuses the override path (same _EXTRACT_PAYLOAD fixture as D42's
+# tests above) since a plain pass and an overridden soft failure share
+# the exact same `return RedirectResponse(...)` line in approve() -- one
+# test on that line is sufficient, not two near-identical ones.
+
+
+def test_approve_redirects_to_the_detail_page_not_the_list(conn, client_factory):
+    job_id = _seed_job(conn, apply_url="https://job-boards.greenhouse.io/acme/jobs/1")
+    _seed_base_resume(conn)
+    client = client_factory(_FakeClient(_EXTRACT_PAYLOAD))
+    client.get(f"/jobs/{job_id}/software_engineer")
+
+    response = client.post(
+        f"/jobs/{job_id}/software_engineer/approve",
+        data={"override_soft_failure": "true"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == f"/jobs/{job_id}/software_engineer"
+
+
+def test_approved_detail_page_shows_apply_url_and_hides_action_buttons(
+    conn, client_factory
+):
+    job_id = _seed_job(conn, apply_url="https://job-boards.greenhouse.io/acme/jobs/1")
+    _seed_base_resume(conn)
+    client = client_factory(_FakeClient(_EXTRACT_PAYLOAD))
+    client.get(f"/jobs/{job_id}/software_engineer")
+    client.post(
+        f"/jobs/{job_id}/software_engineer/approve",
+        data={"override_soft_failure": "true"},
+        follow_redirects=False,
+    )
+
+    response = client.get(f"/jobs/{job_id}/software_engineer")
+
+    assert "https://job-boards.greenhouse.io/acme/jobs/1" in response.text
+    assert "manual" in response.text.lower()
+    assert f'action="/jobs/{job_id}/software_engineer/approve"' not in response.text
+    assert f'action="/jobs/{job_id}/software_engineer/reject"' not in response.text
+
+
+def test_pending_detail_page_does_not_show_the_approved_confirmation_block(
+    conn, client_factory
+):
+    job_id = _seed_job(conn, apply_url="https://job-boards.greenhouse.io/acme/jobs/1")
+    _seed_base_resume(conn)
+    client = client_factory(_FakeClient(_EXTRACT_PAYLOAD))
+
+    response = client.get(f"/jobs/{job_id}/software_engineer")
+
+    assert "https://job-boards.greenhouse.io/acme/jobs/1" not in response.text
+    assert "manual" not in response.text.lower()
 
 
 def test_detail_page_hides_any_approve_form_for_a_hard_failure(conn, client_factory):

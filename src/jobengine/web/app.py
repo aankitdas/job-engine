@@ -229,7 +229,13 @@ def approve(
         # all, and a soft failure's only approve form already carries
         # override_soft_failure=true.
         raise HTTPException(status_code=409, detail=str(exc)) from None
-    return RedirectResponse(url="/", status_code=303)
+    # D44: redirect back to the detail page, not "/" -- an approved job
+    # disappears from both list sections (list_pending_review_queue()
+    # only returns 'pending'; list_existing_variant_pairs() excludes any
+    # reviewed pair from "not yet reviewed" too), so "/" would strand the
+    # reviewer with no path back to the apply URL/resume they just
+    # earned. See docs/decisions.md D44.
+    return RedirectResponse(url=f"/jobs/{job_id}/{profile}", status_code=303)
 
 
 @app.post("/jobs/{job_id}/{profile}/reject")
