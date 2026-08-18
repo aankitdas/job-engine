@@ -559,12 +559,20 @@ def find_job_resume_variant_by_hash(
 
 
 def update_review_status(
-    conn: sqlite3.Connection, variant_id: int, status: str, reviewed_at: str
+    conn: sqlite3.Connection,
+    variant_id: int,
+    status: str,
+    reviewed_at: str,
+    accepted: bool | None = None,
 ) -> None:
+    """accepted defaults to None (leave untouched, via COALESCE) so the
+    existing 4-positional-arg callers (reject(), approve()'s clean path)
+    don't clobber it. D42: approve()'s soft-failure override path passes
+    accepted=True."""
     conn.execute(
-        "UPDATE job_resume_variants SET review_status = ?, reviewed_at = ? "
-        "WHERE id = ?",
-        (status, reviewed_at, variant_id),
+        "UPDATE job_resume_variants SET review_status = ?, reviewed_at = ?, "
+        "accepted = COALESCE(?, accepted) WHERE id = ?",
+        (status, reviewed_at, accepted, variant_id),
     )
 
 

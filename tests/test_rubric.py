@@ -611,3 +611,29 @@ def test_score_resume_runs_end_to_end_against_the_real_bank(real_sample_pdf):
     assert 0.0 <= result.score <= 100.0
     assert isinstance(result.passed, bool)
     assert "coverage" in result.measurements
+
+
+# --- has_unrecoverable_rubric_failure: spec 08's P4 soft/hard split
+# (D42) -- R001-only is a "soft" deficit eligible for human override at
+# approve() time; any other hard rule is a genuine document defect and
+# is never overridable.
+
+
+def test_no_failures_is_not_unrecoverable():
+    assert rules.has_unrecoverable_rubric_failure([]) is False
+
+
+def test_r001_only_is_not_unrecoverable():
+    assert rules.has_unrecoverable_rubric_failure(["R001"]) is False
+
+
+def test_r001_plus_another_rule_is_unrecoverable():
+    assert rules.has_unrecoverable_rubric_failure(["R001", "R003"]) is True
+
+
+def test_r006_alone_is_unrecoverable():
+    assert rules.has_unrecoverable_rubric_failure(["R006"]) is True
+
+
+def test_multiple_non_r001_rules_are_unrecoverable():
+    assert rules.has_unrecoverable_rubric_failure(["R010", "R013"]) is True

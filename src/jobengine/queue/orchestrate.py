@@ -30,6 +30,7 @@ from jobengine.db.models import (
     get_job_analysis,
     get_job_by_id,
     get_job_resume_variant,
+    get_rubric_results,
     insert_application,
     insert_job_resume_variant,
     insert_rubric_results,
@@ -45,6 +46,7 @@ from jobengine.profiles.config import ProfileConfig
 from jobengine.resume.bank import Bank
 from jobengine.resume.render import Identity
 from jobengine.rubric import patch
+from jobengine.rubric.rules import has_unrecoverable_rubric_failure
 
 _VARIANTS_OUT_ROOT = Path("resume/rendered/variants")
 
@@ -72,6 +74,18 @@ class NoBaseResumeError(RuntimeError):
 class JobNotFoundError(RuntimeError):
     """Raised when ensure_reviewed() is given a job_id that doesn't
     exist in jobs."""
+
+
+class HardRubricFailureError(RuntimeError):
+    """Raised by approve() when the variant fails a hard rule other than
+    R001 -- a genuine document defect (D33), never overridable. See D42
+    in docs/decisions.md."""
+
+
+class UnacknowledgedSoftFailureError(RuntimeError):
+    """Raised by approve() when the variant fails R001 only (a soft,
+    human-overridable deficit per spec 08's P4 language) and
+    override_soft_failure was not passed. See D42 in docs/decisions.md."""
 
 
 def _selection_hash(bank: Bank) -> str:
@@ -179,14 +193,37 @@ def ensure_reviewed(ctx: QueueContext, job_id: int, profile: str) -> JobResumeVa
     return get_job_resume_variant(ctx.conn, job_id, profile)
 
 
-def approve(ctx: QueueContext, variant: JobResumeVariant) -> int:
+def approve(
+    ctx: QueueContext, variant: JobResumeVariant, *, override_soft_failure: bool = False
+) -> int:
     """Human review decision: approved. Creates the applications row
     (deliberately not created earlier, at pending_review time -- see
     docs/decisions.md's F1 entry on why is_already_applied() requires
-    this). autonomy_level defaults to 0 (most manual); Phase G's G1 is
-    what refines it per D16, not this function."""
+    this). autonomy_level defaults to 0 (most manual); Phase G's G1
+    computes a real ceiling but nothing here consumes it yet, a
+    deliberately separate decision -- see D42 in docs/decisions.md.
+
+    D42: a variant that fails the rubric is not silently approvable.
+    R001-only ("soft", spec 08's P4 language) requires the caller to
+    explicitly pass override_soft_failure=True, which also marks the
+    variant accepted=True. Any other hard rule (R003/.../R013, "hard")
+    is never overridable -- override_soft_failure does not bypass it."""
+    if not variant.passed:
+        hard_failures = [r.rule_id for r in get_rubric_results(ctx.conn, variant.id)]
+        if has_unrecoverable_rubric_failure(hard_failures):
+            raise HardRubricFailureError(
+                f"variant {variant.id} fails a non-R001 hard rule "
+                f"({hard_failures}); cannot be approved as-is"
+            )
+        if not override_soft_failure:
+            raise UnacknowledgedSoftFailureError(
+                f"variant {variant.id} fails R001 (coverage) only; pass "
+                "override_soft_failure=True to approve anyway"
+            )
+
     now = datetime.now(UTC).isoformat()
-    update_review_status(ctx.conn, variant.id, "approved", now)
+    accepted = True if not variant.passed else None
+    update_review_status(ctx.conn, variant.id, "approved", now, accepted=accepted)
     application_id = insert_application(
         ctx.conn,
         Application(

@@ -1895,3 +1895,243 @@ change deliberately reverses
 (`test_seniority_does_not_exclude_staff_ai_engineer` -> removed, staff
 is now excluded by design). Full suite 477/477 (up from 471), `ruff
 check`/`format --check` clean.
+
+---
+
+**D41. A real, full-chain end-to-end walkthrough (extract -> review ->
+approve -> resume file -> apply URL -> real form schema + autonomy
+ceiling) on one real job, before G2, surfaced a third real gap neither
+of the two already-known ones predicted: nothing anywhere blocks
+approving a resume variant that failed the rubric.**
+
+No new code. Every function called already existed and was already
+tested (`orchestrate.ensure_reviewed`/`approve`, the same ones
+`web/app.py`'s routes call; `apply.form_schema`'s existing CLI). The
+point was to chain them for real, on one real job, and see where a
+human still has to step in before any browser automation exists.
+
+**The job: 3950 (Discord, "Senior Software Engineer, Enterprise
+Platform," `software_engineer`).** Picked by live query, not in
+advance: Greenhouse, open, passes every B3 filter including D40's new
+seniority check, clears the relevance floor at 95.0 -- among the
+highest-scored jobs in the real queue. Had a real `job_analysis` row
+already (from `daily_batch`, 2026-08-13) but no `job_resume_variants`
+row and no `applications` row, so the patch-ladder/render/approve steps
+genuinely executed live during this run rather than replaying one.
+
+**Real result: the patch ladder produced a variant that FAILS the
+rubric (`passed=False`, score 16.64, coverage 0.10, R001 FAIL), despite
+C4 having scored this exact job 95/100 relevance.** Real cause, not a
+bug: `job_analysis.required_keywords` for this JD (Go, Python,
+TypeScript, Terraform, CI/CD, SSO, SCIM, OAuth, OIDC, RBAC -- an
+enterprise identity/IaC platform role, `jd_quality` already flagged
+`'bad'` by C3) has almost no overlap with the current
+`software_engineer` bank content, and P1 (swap) has been a structural
+no-op against this bank since D29 -- there's no held-back bullet
+carrying these keywords for P0-P2 to promote, and P3 (rephrase) can't
+honestly manufacture SSO/SCIM/Terraform experience that was never
+described in the bank (D18's fabrication guard doing exactly its job).
+C4's relevance score measures title/seniority/skill-area fit, not
+"does the bank have enough real material to cover this JD's specific
+keyword list" -- these are different questions, and this run is the
+first time a real job has surfaced daylight between them this wide (95
+relevance, 16.64 rubric score).
+
+**`orchestrate.approve()` was called anyway, deliberately, to see what
+actually happens -- and nothing stopped it.** Real `applications` row
+id 1 (the first one this project has ever written outside a test),
+`autonomy_level=0`, `status='queued'`, for a variant that failed its
+own rubric. Neither `orchestrate.approve()` nor `web/app.py`'s
+`POST /jobs/{job_id}/{profile}/approve` route checks `variant.passed`
+before creating the row. F1's review queue UI does show the score/
+coverage/hard-failures on the detail page before a human clicks
+Approve (so a human paying attention would catch this), but nothing in
+the code path enforces it -- an inattentive click, or any future
+automated-approval path, would queue a genuinely poor-fit resume with
+no gate at all. Not fixed here (out of this run's scope, and "should a
+failing variant even be approvable" is a product judgment call, not an
+obvious bug fix); flagged for whoever designs F1's next iteration or an
+approval gate.
+
+**Real, working-as-designed dedup, not a bug, but worth recording since
+it looked surprising at first:** the returned variant's `docx_path`/
+`pdf_path` point at job 3871's rendered files
+(`resume/rendered/variants/3871/software_engineer/candidate_P0_P1_P2_P3.docx`),
+not a new `3950/` directory. Confirmed via direct query:
+`job_resume_variants` ids 1 (job 3871) and 2 (job 3950) share the exact
+same `selection_hash` -- the patch ladder independently converged on
+the identical bank-bullet selection for both jobs (unsurprising given
+P1's structural no-op status, D29), so F1's own dedup design
+(`find_job_resume_variant_by_hash`, D35) correctly reused the existing
+file rather than re-rendering an identical one. Both variants score
+similarly low (18.98 and 16.64) and both fail the rubric -- not a
+coincidence specific to this pair, likely the same bank-coverage
+ceiling showing up twice.
+
+**The two gaps the user already knew about, now with real numbers
+attached instead of descriptions:**
+
+1. Job 3950's real, live-fetched (re-run at execution time, not just
+   planning time) form schema: **autonomy ceiling 1**, 4 unmapped
+   required fields -- "Why do you want to work at Discord?" (a genuine
+   free-text essay no code here can honestly answer, D18) plus 3
+   eligibility questions (legally authorized to work / willing to
+   relocate to the Bay Area / currently located in the US), all three
+   answerable in principle from `identity.toml`'s real
+   `authorized_to_work_us = true` / `willing_to_relocate = true` fields
+   but deliberately unmapped per D39's own scope cut. The real
+   `applications` row this run created says `autonomy_level=0`; the
+   real computed ceiling for the identical job says `1`. Both numbers
+   exist, in the same db, for the same job, right now, with no code
+   path connecting them -- `approve()` never reads
+   `classify_autonomy_ceiling()`'s output at all.
+2. Live-queried the population this actually matters to, not just
+   D39's old 41.3%-of-all-scored-jobs figure (which includes jobs
+   nobody would ever approve): of the **573 real distinct jobs that
+   currently pass every B3 filter and clear the relevance floor** (the
+   actual approvable-queue population), **293 (51.1%) are `ats='ashby'`**
+   and would get no computed autonomy ceiling at all if picked instead
+   of 3950 -- worse than the all-scored-jobs figure suggested, not
+   better.
+
+**Net finding for whoever designs G2 next:** the browser-automation
+question ("can Playwright fill this form") is not actually the nearest
+blocker. Three things sit in front of it, none requiring a browser: (a)
+roughly half the real approvable queue has no computed ceiling at all
+(Ashby); (b) even a Greenhouse job at the best ceiling this system
+computes today (1) still needs a human to write real prose and answer
+eligibility questions by hand; (c) nothing currently stops a rubric-
+failing variant from reaching `applications` in the first place, so
+"which applications are even worth automating" isn't a solved question
+yet either. G2 (Playwright dry-run) is still the right next Phase G
+step per TODO.md's own ordering, but designing it without accounting
+for (a)-(c) would automate filling forms for jobs that, on today's real
+data, are disproportionately either uncoverable (Ashby) or poor rubric
+fits.
+
+Full suite re-run after this walkthrough (no source changed): 477/477,
+`ruff check`/`format --check` clean.
+
+---
+
+**D42. `orchestrate.approve()` now gates on rubric pass/soft-fail/hard-
+fail state, closing the exact real gap D41 found (job 3950 queued
+cleanly despite a real R001 hard failure). R001-only failure is a soft,
+human-overridable deficit; any other hard rule is never overridable --
+both the split and the reuse of the already-existing `accepted` column
+come directly from spec 08's own, never-built P4 language, not invented
+here.**
+
+`specs/08-rubric.md`'s P4 section (never built) already draws this
+exact line: *"Mark the variant `passed: false, accepted: true` if the
+deficit is soft, or skip the job entirely if a hard rule other than
+R001 still fails."* D33 independently arrived at the same split from
+the opposite direction when demoting R002 (front-load) but deliberately
+leaving R001 alone: R001 "is the system's only gate against a resume
+that doesn't cover the job's keywords at all," carrying D27's
+precedent toward strictness. This decision reuses both -- the soft/hard
+split and the `job_resume_variants.accepted` column that already
+existed in the schema, unused, since F1 shipped.
+
+**Real evidence, gathered read-only before deciding how strict the gate
+should be, confirms the split is load-bearing, not just spec-
+literalism.** Of the 623 (job, profile) pairs currently passing every
+B3 filter and the relevance floor, 67 already have real extraction done
+(`job_analysis`). Of those 67, **66 (98.5%) already fail R001 coverage
+before any patching at all** (`measure.coverage()` against
+`measure.select_for_profile()`'s pre-patch candidate, per profile).
+This is not a loose proxy: per D29, P1 (swap) is a structural no-op
+against the current bank for every profile, and P0/P2 only reorder or
+promote existing content -- neither can change which keywords a
+candidate carries. Only P3 can move coverage, and it's capped at 2
+calls/job with a fabrication guard already proven (D30, job 318) to
+decline inventing experience rather than close a gap dishonestly. Both
+real variants that exist (3871, 3950) hard-fail on exactly `['R001']`,
+nothing else. Separately, all 11 other gated hard rules were checked
+directly against `select_for_profile()`'s output for all 3 profiles:
+zero failures, for any profile -- expected, not coincidental, since the
+base bank already passed clean per E2, P0/P2 don't touch content that
+would regress R003/R005/R007/R008/R009/R012/R013, and `apply_p3()`
+already discards any rewrite that would regress R005/R006/R007/R008
+(D4). In practice, on this pipeline's real output, `hard_failures` is
+essentially always either `[]` or exactly `['R001']`. A uniform hard
+block would therefore reject ~98% of the real queue outright -- this is
+a bank-coverage problem (P4/gap-ledger territory, still unbuilt), not a
+rare edge case, so the fix had to be override-shaped, not block-shaped,
+for the queue to stay useful at all.
+
+**`has_unrecoverable_rubric_failure(hard_failures: list[str]) -> bool`**
+(`src/jobengine/rubric/rules.py`) is the one new pure function: True if
+`hard_failures` contains any rule other than R001. Tests first
+(`tests/test_rubric.py`, 5 new cases) per hard rule 7.
+
+**The gate lives in `orchestrate.approve()` itself, not just the web
+layer, because only `orchestrate.approve()` is reachable from a future
+automated path (G3/G4).** Enforcing only at the FastAPI route would
+silently stop protecting anything the moment G3/G4 exists -- the same
+class of bug D35 already found and fixed once (review state almost went
+on `applications` instead of `job_resume_variants` for the identical
+future-path reason). Two new exceptions, same pattern as the existing
+`NoBaseResumeError`/`JobNotFoundError`: `HardRubricFailureError`
+(raised regardless of any override -- there is no override path for a
+non-R001 hard rule) and `UnacknowledgedSoftFailureError` (raised only
+when `override_soft_failure` is not passed). `approve()` gains a
+keyword-only `override_soft_failure: bool = False` param; passing it
+True on a genuinely soft (R001-only) failure proceeds and marks the
+variant `accepted=True` via `update_review_status()`'s new optional
+`accepted` param (`SET accepted = COALESCE(?, accepted)`, so `reject()`'s
+existing 4-positional-arg calls are unaffected -- no schema change, no
+migration, `accepted` already existed on `job_resume_variants`). Tests
+first (`tests/test_queue_orchestrate.py`, 4 new tests covering all
+three states, including the specific case that override does **not**
+bypass a hard failure).
+
+**The web layer is where "surface prominently, don't silently refuse"
+actually lives, per explicit direction: a hard block should not be a
+silent refusal, and a soft failure should be visible with real numbers,
+not just rejected.** `queue_detail()` (GET) now computes the same
+classification from the already-fetched `rubric_results` the moment the
+page loads, not only after a failed approve attempt, and passes
+`hard_block`/`needs_override` into the template. `queue_detail.html`'s
+previously-unconditional Approve button is now three mutually exclusive
+states: a passing variant gets today's plain Approve form unchanged; a
+soft failure gets the existing fail banner (already showing the real
+coverage number and missing keywords) plus a visually distinct amber
+"Approve anyway" form (`override_soft_failure=true` hidden field); a
+hard failure gets an explanatory banner and **no approve form at all**
+-- Reject stays available in every state. The POST route gains a form
+field and catches both new exceptions as 409, a backstop for a stale
+page or a future caller that skips the check, not the primary UX
+mechanism. Tests first (`tests/test_web_app.py`): **the existing
+`test_approve_flips_review_status_and_creates_application` test was
+itself exercising the exact bug being fixed** (`_EXTRACT_PAYLOAD`'s
+`["Go", "Kubernetes"]` has no real bank coverage, so its seeded variant
+is a real R001-only failure, and the test asserted a bare POST approve
+succeeded) -- split into a without-override-returns-409 test and a
+with-override-succeeds-and-sets-accepted test, plus two new tests for
+the detail page's button states in both the soft and hard cases.
+
+**Autonomy ceiling deliberately NOT consumed here, kept separable --
+same precedent D37 already set with `passes_relevance_floor()` as an
+independent gate from B3's filters.** Three reasons: the rubric gate
+and the autonomy ceiling answer different questions (resume quality vs.
+how much of *submission* can be automated); every variant reaching
+`approve()` has rubric data, but the ceiling is Greenhouse-only (D39) --
+forcing `approve()` to consume it means deciding right now what happens
+for the ~51% of the real approvable queue that's Ashby (D41), a real,
+separate design question; and D37's own precedent already established
+that composable independent gates, not one merged gate, is the right
+shape when the questions and fail-open semantics differ.
+`applications.autonomy_level=0` stays hardcoded, still flagged (D41,
+PROGRESS.md Known Issues) as a distinct follow-up.
+
+**Verified against the real db, not just the automated suite:** called
+`orchestrate.approve()` directly on job 3950's real variant (id 2,
+`passed=False`, still `review_status='approved'` from D41's pre-fix
+approval, `accepted` still `None`) with no override -- confirmed it now
+raises `UnacknowledgedSoftFailureError`, concrete proof the exact real
+gap D41 found is closed. Confirmed no side effect from this check
+(`applications` count unchanged at 1, the variant's own
+`review_status`/`accepted` unchanged) since the gate raises before any
+write. Full suite 491/491 (up from 477, +14 tests), `ruff check`/
+`format --check` clean.

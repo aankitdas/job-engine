@@ -17,8 +17,12 @@ from jobengine.db.migrate import connect, init
 from jobengine.db.models import (
     BaseResume,
     Job,
+    JobResumeVariant,
+    RubricResultRow,
     get_job_resume_variant,
     insert_base_resume,
+    insert_job_resume_variant,
+    insert_rubric_results,
     upsert_job,
 )
 from jobengine.llm.schemas import (
@@ -383,7 +387,17 @@ def test_list_page_shows_untriggered_job_with_no_relevance_score_yet(
     assert "Backend Engineer" in response.text
 
 
-def test_approve_flips_review_status_and_creates_application(conn, client_factory):
+# D42: _EXTRACT_PAYLOAD's ["Go", "Kubernetes"] has no coverage in the
+# real bank (the same test_detail_page test below already asserts "R001"
+# appears on this exact fixture's rendered page), so every variant seeded
+# with it is a real, soft (R001-only) rubric failure -- approve() now
+# gates on that, and this used to be the bug D42 fixes: a bare POST
+# approve on this variant used to succeed silently.
+
+
+def test_approve_without_override_on_a_soft_failing_variant_is_rejected(
+    conn, client_factory
+):
     job_id = _seed_job(conn)
     _seed_base_resume(conn)
     client = client_factory(_FakeClient(_EXTRACT_PAYLOAD))
@@ -393,9 +407,31 @@ def test_approve_flips_review_status_and_creates_application(conn, client_factor
         f"/jobs/{job_id}/software_engineer/approve", follow_redirects=False
     )
 
+    assert response.status_code == 409
+    variant = get_job_resume_variant(conn, job_id, "software_engineer")
+    assert variant.review_status == "pending"
+    application = conn.execute(
+        "SELECT 1 FROM applications WHERE resume_variant_id = ?", (variant.id,)
+    ).fetchone()
+    assert application is None
+
+
+def test_approve_with_override_on_a_soft_failing_variant_succeeds(conn, client_factory):
+    job_id = _seed_job(conn)
+    _seed_base_resume(conn)
+    client = client_factory(_FakeClient(_EXTRACT_PAYLOAD))
+    client.get(f"/jobs/{job_id}/software_engineer")
+
+    response = client.post(
+        f"/jobs/{job_id}/software_engineer/approve",
+        data={"override_soft_failure": "true"},
+        follow_redirects=False,
+    )
+
     assert response.status_code == 303
     variant = get_job_resume_variant(conn, job_id, "software_engineer")
     assert variant.review_status == "approved"
+    assert variant.accepted is True
     application = conn.execute(
         "SELECT status, autonomy_level FROM applications WHERE resume_variant_id = ?",
         (variant.id,),
@@ -403,6 +439,57 @@ def test_approve_flips_review_status_and_creates_application(conn, client_factor
     assert application is not None
     assert application["status"] == "queued"
     assert application["autonomy_level"] == 0
+
+
+def test_detail_page_shows_approve_anyway_button_for_a_soft_failure(
+    conn, client_factory
+):
+    job_id = _seed_job(conn)
+    _seed_base_resume(conn)
+    client = client_factory(_FakeClient(_EXTRACT_PAYLOAD))
+
+    response = client.get(f"/jobs/{job_id}/software_engineer")
+
+    assert "override_soft_failure" in response.text
+    assert "approve anyway" in response.text.lower()
+
+
+def test_detail_page_hides_any_approve_form_for_a_hard_failure(conn, client_factory):
+    job_id = _seed_job(conn)
+    resume_id = _seed_base_resume(conn)
+    variant_id = insert_job_resume_variant(
+        conn,
+        JobResumeVariant(
+            job_id=job_id,
+            profile="software_engineer",
+            base_resume_id=resume_id,
+            selection_hash="hard-fail-hash",
+            score=40.0,
+            coverage=0.5,
+            front_load=0.5,
+            passed=False,
+            created_at="2026-08-17T00:00:00+00:00",
+        ),
+    )
+    insert_rubric_results(
+        conn,
+        [
+            RubricResultRow(
+                job_resume_variant_id=variant_id,
+                rule_id="R010",
+                passed=False,
+                detail="margins wrong",
+                evaluated_at="2026-08-17T00:00:00+00:00",
+            )
+        ],
+    )
+    conn.commit()
+    client = client_factory(_FakeClient(_EXTRACT_PAYLOAD))
+
+    response = client.get(f"/jobs/{job_id}/software_engineer")
+
+    assert response.status_code == 200
+    assert f'action="/jobs/{job_id}/software_engineer/approve"' not in response.text
 
 
 def test_reject_flips_review_status_and_creates_no_application(conn, client_factory):

@@ -183,6 +183,20 @@ def check_r013(bank: Bank) -> Deficit | None:
     return Deficit(rule="R013", detail="; ".join(str(issue) for issue in issues[:5]))
 
 
+def has_unrecoverable_rubric_failure(hard_failures: list[str]) -> bool:
+    """True if hard_failures contains any rule other than R001. Per
+    specs/08-rubric.md's P4 section ("mark the variant passed: false,
+    accepted: true if the deficit is soft, or skip the job entirely if a
+    hard rule other than R001 still fails") and D33 in docs/decisions.md
+    (R001 is deliberately the one hard rule NOT demoted alongside R002,
+    "the system's only gate against a resume that doesn't cover the
+    job's keywords at all"), an R001-only failure is a soft, human-
+    overridable deficit; any other hard rule is a genuine document
+    defect and is never overridable. See D42 for where this is
+    consumed (queue/orchestrate.py's approve())."""
+    return any(rule != "R001" for rule in hard_failures)
+
+
 def score_resume(
     *,
     bank: Bank,

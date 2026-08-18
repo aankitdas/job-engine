@@ -474,6 +474,32 @@ def test_update_review_status_sets_status_and_reviewed_at(
     assert variant.reviewed_at == "2026-08-07T01:00:00+00:00"
 
 
+def test_update_review_status_without_accepted_leaves_it_untouched(
+    conn_with_job_and_base_resume,
+):
+    """D42: reject() and approve()'s existing 3-positional-arg call sites
+    don't pass accepted at all; the default None must not clobber
+    whatever was already there (starts NULL, stays NULL)."""
+    conn, job_id, resume_id = conn_with_job_and_base_resume
+    variant_id = insert_job_resume_variant(conn, _variant(job_id, resume_id))
+    update_review_status(conn, variant_id, "rejected", "2026-08-07T01:00:00+00:00")
+    variant = get_job_resume_variant(conn, job_id, "software_engineer")
+    assert variant.accepted is None
+
+
+def test_update_review_status_can_set_accepted_true(conn_with_job_and_base_resume):
+    """D42: approve()'s soft-failure override path sets accepted=True
+    alongside review_status='approved'."""
+    conn, job_id, resume_id = conn_with_job_and_base_resume
+    variant_id = insert_job_resume_variant(conn, _variant(job_id, resume_id))
+    update_review_status(
+        conn, variant_id, "approved", "2026-08-07T01:00:00+00:00", accepted=True
+    )
+    variant = get_job_resume_variant(conn, job_id, "software_engineer")
+    assert variant.review_status == "approved"
+    assert variant.accepted is True
+
+
 def test_insert_and_get_rubric_results_round_trip(conn_with_job_and_base_resume):
     conn, job_id, resume_id = conn_with_job_and_base_resume
     variant_id = insert_job_resume_variant(conn, _variant(job_id, resume_id))

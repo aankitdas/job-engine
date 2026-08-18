@@ -8,6 +8,7 @@
     .banner { padding: 0.75rem 1rem; margin: 1rem 0; border-radius: 4px; }
     .banner.fail { background: #fdd; border: 1px solid #a00; }
     .banner.pass { background: #dfd; border: 1px solid #070; }
+    .banner.override { background: #fff3cd; border: 1px solid #b8860b; }
     dl { display: grid; grid-template-columns: 12rem 1fr; row-gap: 0.3rem; }
     dt { font-weight: bold; }
     ul.deficits { color: #a00; }
@@ -15,6 +16,7 @@
     form.actions button { font-size: 1rem; padding: 0.5rem 1.5rem; margin-right: 1rem; }
     button.reject { background: #a00; color: white; border: none; }
     button.approve { background: #070; color: white; border: none; }
+    button.approve-anyway { background: #b8860b; color: white; border: none; }
   </style>
 </head>
 <body>
@@ -56,11 +58,32 @@
   <p><a href="{{ docx_url }}" download>Download .docx</a></p>
   {% endif %}
 
+  {% if needs_override %}
+  <div class="banner override">
+    This resume does not meet the coverage bar (R001) but the deficit is
+    soft &mdash; per docs/decisions.md D42, you may approve it anyway.
+  </div>
+  {% elif hard_block %}
+  <div class="banner fail">
+    Cannot approve: this resume fails a rubric rule other than R001
+    (see Hard failures above). That is a genuine document defect, not a
+    coverage gap, and is never overridable here &mdash; it needs a bank
+    or patch-ladder fix before it can be sent.
+  </div>
+  {% endif %}
+
   <form class="actions" method="post" action="/jobs/{{ job.id }}/{{ profile }}/reject" style="display:inline">
     <button type="submit" class="reject">Reject</button>
   </form>
+  {% if variant.passed %}
   <form class="actions" method="post" action="/jobs/{{ job.id }}/{{ profile }}/approve" style="display:inline">
     <button type="submit" class="approve">Approve</button>
   </form>
+  {% elif needs_override %}
+  <form class="actions" method="post" action="/jobs/{{ job.id }}/{{ profile }}/approve" style="display:inline">
+    <input type="hidden" name="override_soft_failure" value="true">
+    <button type="submit" class="approve-anyway">Approve anyway</button>
+  </form>
+  {% endif %}
 </body>
 </html>

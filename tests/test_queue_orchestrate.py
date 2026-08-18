@@ -21,9 +21,14 @@ from jobengine.db.migrate import connect, init
 from jobengine.db.models import (
     BaseResume,
     Job,
+    JobResumeVariant,
+    RubricResultRow,
     get_job_analysis,
+    get_job_resume_variant,
     get_rubric_results,
     insert_base_resume,
+    insert_job_resume_variant,
+    insert_rubric_results,
     upsert_job,
 )
 from jobengine.llm.schemas import (
@@ -189,6 +194,14 @@ _EXTRACT_PAYLOAD = {
     "tech_stack": ["Go", "Kubernetes"],
 }
 
+# No required keywords -> R001 coverage is trivially 1.0 -> a genuinely
+# passing variant, for D42's clean-approval-path tests.
+_PASSING_EXTRACT_PAYLOAD = {
+    "required_keywords": [],
+    "preferred_keywords": [],
+    "tech_stack": [],
+}
+
 
 def _ctx(conn, local_client) -> orchestrate.QueueContext:
     return orchestrate.QueueContext(
@@ -297,3 +310,106 @@ def test_list_queue_returns_pending_entries(conn):
 
     entries = orchestrate.list_queue(conn)
     assert any(e.job_id == job_id for e in entries)
+
+
+# --- D42: approve() gates on rubric pass/soft-fail/hard-fail state. See
+# docs/decisions.md D42 -- real job 3950 queued cleanly despite a real
+# R001 hard failure, and orchestrate.approve() never checked variant.
+# passed at all. R001-only is a soft, human-overridable deficit (spec
+# 08's P4 language, D33); any other hard rule is never overridable.
+
+
+def test_approve_creates_application_for_a_passing_variant(conn):
+    job_id = _seed_job(conn)
+    _seed_base_resume(conn)
+    ctx = _ctx(conn, _FakeClient(_PASSING_EXTRACT_PAYLOAD))
+    variant = orchestrate.ensure_reviewed(ctx, job_id, "software_engineer")
+    assert variant.passed is True  # sanity: this is the clean path
+
+    application_id = orchestrate.approve(ctx, variant)
+
+    application = conn.execute(
+        "SELECT status, autonomy_level FROM applications WHERE id = ?",
+        (application_id,),
+    ).fetchone()
+    assert application["status"] == "queued"
+    assert application["autonomy_level"] == 0
+
+
+def test_approve_raises_unacknowledged_soft_failure_without_override(conn):
+    job_id = _seed_job(conn)
+    _seed_base_resume(conn)
+    ctx = _ctx(conn, _FakeClient(_EXTRACT_PAYLOAD))
+    variant = orchestrate.ensure_reviewed(ctx, job_id, "software_engineer")
+    assert variant.passed is False  # sanity: real R001-only deficit
+
+    with pytest.raises(orchestrate.UnacknowledgedSoftFailureError):
+        orchestrate.approve(ctx, variant)
+
+    application = conn.execute(
+        "SELECT 1 FROM applications WHERE resume_variant_id = ?", (variant.id,)
+    ).fetchone()
+    assert application is None
+
+
+def test_approve_succeeds_with_override_and_marks_variant_accepted(conn):
+    job_id = _seed_job(conn)
+    _seed_base_resume(conn)
+    ctx = _ctx(conn, _FakeClient(_EXTRACT_PAYLOAD))
+    variant = orchestrate.ensure_reviewed(ctx, job_id, "software_engineer")
+
+    application_id = orchestrate.approve(ctx, variant, override_soft_failure=True)
+
+    application = conn.execute(
+        "SELECT status, autonomy_level FROM applications WHERE id = ?",
+        (application_id,),
+    ).fetchone()
+    assert application["status"] == "queued"
+    assert application["autonomy_level"] == 0
+    reloaded = get_job_resume_variant(conn, job_id, "software_engineer")
+    assert reloaded.accepted is True
+    assert reloaded.review_status == "approved"
+
+
+def test_approve_raises_hard_rubric_failure_even_with_override(conn):
+    """override_soft_failure never bypasses a hard (non-R001) failure --
+    that's the one case with no override path at all."""
+    job_id = _seed_job(conn)
+    resume_id = _seed_base_resume(conn)
+    variant_id = insert_job_resume_variant(
+        conn,
+        JobResumeVariant(
+            job_id=job_id,
+            profile="software_engineer",
+            base_resume_id=resume_id,
+            selection_hash="hard-fail-hash",
+            score=40.0,
+            coverage=0.5,
+            front_load=0.5,
+            passed=False,
+            created_at="2026-08-17T00:00:00+00:00",
+        ),
+    )
+    insert_rubric_results(
+        conn,
+        [
+            RubricResultRow(
+                job_resume_variant_id=variant_id,
+                rule_id="R010",
+                passed=False,
+                detail="margins wrong",
+                evaluated_at="2026-08-17T00:00:00+00:00",
+            )
+        ],
+    )
+    conn.commit()
+    variant = get_job_resume_variant(conn, job_id, "software_engineer")
+    ctx = _ctx(conn, _FakeClient(_PASSING_EXTRACT_PAYLOAD))
+
+    with pytest.raises(orchestrate.HardRubricFailureError):
+        orchestrate.approve(ctx, variant, override_soft_failure=True)
+
+    application = conn.execute(
+        "SELECT 1 FROM applications WHERE resume_variant_id = ?", (variant.id,)
+    ).fetchone()
+    assert application is None

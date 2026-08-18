@@ -16,7 +16,7 @@ import os
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -42,6 +42,7 @@ from jobengine.profiles.config import load_profile_config
 from jobengine.queue import orchestrate
 from jobengine.resume.bank import load_bank
 from jobengine.resume.render import load_identity
+from jobengine.rubric.rules import has_unrecoverable_rubric_failure
 
 _TEMPLATES_DIR = Path(__file__).parent / "templates"
 templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
@@ -160,6 +161,15 @@ def queue_detail(
     job = get_job_by_id(ctx.conn, job_id)
     analysis = get_job_analysis(ctx.conn, job_id, profile)
     rubric_results = get_rubric_results(ctx.conn, variant.id)
+    hard_block = False
+    needs_override = False
+    if not variant.passed:
+        # D42: computed here (not just at approve()) so the failure state
+        # is surfaced the moment the page loads, not only after a failed
+        # approve attempt.
+        failing_rules = [r.rule_id for r in rubric_results]
+        hard_block = has_unrecoverable_rubric_failure(failing_rules)
+        needs_override = not hard_block
     return templates.TemplateResponse(
         request,
         "queue_detail.html",
@@ -171,6 +181,8 @@ def queue_detail(
             "rubric_results": rubric_results,
             "pdf_url": _resume_static_url(variant.pdf_path),
             "docx_url": _resume_static_url(variant.docx_path),
+            "hard_block": hard_block,
+            "needs_override": needs_override,
         },
     )
 
@@ -203,9 +215,20 @@ def approve(
     job_id: int,
     profile: str,
     ctx: orchestrate.QueueContext = Depends(get_ctx),  # noqa: B008
+    override_soft_failure: bool = Form(False),
 ):
     variant = _variant_or_404(ctx, job_id, profile)
-    orchestrate.approve(ctx, variant)
+    try:
+        orchestrate.approve(ctx, variant, override_soft_failure=override_soft_failure)
+    except (
+        orchestrate.HardRubricFailureError,
+        orchestrate.UnacknowledgedSoftFailureError,
+    ) as exc:
+        # Backstop only: the detail page never normally offers a way to
+        # trigger these (D42) -- a hard failure gets no approve form at
+        # all, and a soft failure's only approve form already carries
+        # override_soft_failure=true.
+        raise HTTPException(status_code=409, detail=str(exc)) from None
     return RedirectResponse(url="/", status_code=303)
 
 
