@@ -2135,3 +2135,150 @@ gap D41 found is closed. Confirmed no side effect from this check
 `review_status`/`accepted` unchanged) since the gate raises before any
 write. Full suite 491/491 (up from 477, +14 tests), `ruff check`/
 `format --check` clean.
+
+---
+
+**D43. P4 (accept and log) built, scoped to exactly what spec 08 says:
+`ensure_reviewed()` now logs every still-missing required keyword to
+`gap_ledger` after `run_ladder()` exhausts. It never touches
+`accepted`/`review_status` -- that's a deliberate divergence from spec
+08's literal text, not a silent reinterpretation, and the reasoning is
+D42's own gate, not guessed fresh.**
+
+**The real numbers, gathered read-only before any code, changed what
+this needed to be.** Of 623 real (job, profile) pairs currently passing
+every B3 filter + the relevance floor, 67 already have real extraction
+done. Pre-patch missing keywords for those 67
+(`measure.missing_keywords()` against `select_for_profile()`'s
+candidate; per D29, P0/P1/P2 can't remove any of these, only P3 can, and
+it's capped/guarded), aggregated by distinct job count:
+
+| profile | keyword | distinct jobs |
+|---|---|---|
+| software_engineer | go | 16 |
+| software_engineer | java | 12 |
+| software_engineer | rust | 12 |
+| software_engineer | typescript | 11 |
+| data_scientist | sql | 8 |
+| software_engineer | c++ | 7 |
+| software_engineer | react | 6 |
+| software_engineer | sql | 5 |
+| software_engineer | distributed systems | 5 |
+| software_engineer | aws | 3 |
+
+(140 distinct (profile, keyword) gaps total across the 67 pairs.) **The
+top gaps are not obscure long-tail infra terms -- they're mainstream
+languages `software_engineer`'s bank apparently has zero tagged coverage
+for at all.** A single read-only script already made this legible from
+n=67, using one existing pure function
+(`measure.missing_keywords()`) called nowhere new yet. This is exactly
+the finding that shaped the implementation: P4's actual job isn't
+discovery (that machinery already exists and is nearly free), it's
+durability -- turning an ad hoc snapshot into a persistent, growing
+signal across the full future population for M1's monthly review,
+without building anything heavier than one insert.
+
+**Decision 1: reuse D42's exact soft/hard classification for what
+"soft deficit" means, but do not let P4 auto-write `accepted`.** Spec
+08's P4 text ("mark the variant `accepted: true` if the deficit is
+soft... skip if a hard rule other than R001 still fails") is the same
+sentence D42's `has_unrecoverable_rubric_failure()` already codifies --
+not a coincidence, not a second judgment call, and a second parallel
+classification function would have been a real duplication this
+codebase doesn't have anywhere else. But P4 fires automatically inside
+`ensure_reviewed()`, before any human has looked at the resume -- it's
+a side effect of the ladder giving up, not a review decision. Auto-
+writing `accepted=True` the instant that happens would quietly pre-
+empt D42's entire point (a human must take a distinct, deliberate
+second action to approve a known-failing resume): `accepted` would
+become a synonym for "R001-only failure," set before review even
+starts, and D42's "Approve anyway" button would be approving something
+the system had already marked accepted on its own. **P4 only writes to
+`gap_ledger`. It never touches `review_status` or `accepted`** -- those
+stay exclusively human-driven through D42's existing
+`approve(..., override_soft_failure=True)` path. Spec 08's "skip the
+job entirely if a hard rule other than R001 still fails" is already
+satisfied by D42's `HardRubricFailureError` (such a variant can never
+be approved); F1's own shipped design (D35) always creates and shows a
+variant regardless of pass/fail specifically so a human can see why
+it's blocked, so P4 doesn't need to hide anything either.
+
+Separately: gap-ledger logging itself is unconditional on whether R001
+as a whole passes, not gated by the soft/hard split at all.
+`measure.missing_keywords()` can return non-empty even when R001
+*passes* (8/10 required keywords covered is 0.80 coverage, R001 passes,
+but 2 keywords are still genuinely missing) -- spec 08 says "write
+every still-missing keyword," not "only when R001 fails." `ensure_
+reviewed()` calls `measure.missing_keywords()` directly against the
+ladder's final candidate bank, independent of `result.passed`, so this
+can't silently under-log.
+
+**Decision 2: P4 fires in `orchestrate.ensure_reviewed()`, not inside
+`run_ladder()`.** `run_ladder()` (`rubric/patch.py`) has no `conn`
+parameter and no `job_id` -- deliberately pure per its own module
+docstring ("No persistence to job_resume_variants... here"), reused
+directly by `test_patch.py`'s real-bank integration tests with no db in
+sight. Adding a gap_ledger write inside it would force every caller,
+including those tests, to thread through a db connection and a job_id
+just to run a patch ladder, for no benefit P4 actually needs.
+`ensure_reviewed()` already does the parallel thing today (calls
+`run_ladder()`, then persists `job_resume_variant` and, conditionally,
+`rubric_results`, all in one `conn`-having, `job_id`-having place,
+before one `commit()`); P4 is one more insert at that same site, same
+transaction. `pipeline/batch.py` deliberately never calls
+`run_ladder()`/`ensure_reviewed()` at all (D38's own explicit scope
+cut), so "reachable from the batch path" wasn't the discriminator here
+the way it was for D42's `approve()` gate -- the discriminator is
+purity: `run_ladder()` is the reusable core, `ensure_reviewed()` is the
+one real orchestration point with db context, and P4 is orchestration,
+not patch logic.
+
+**Decision 3: `gap_ledger` accumulates one row per real (job, profile,
+keyword) occurrence, no dedup, no new constraint, no migration.** The
+schema as it already existed (`job_id NOT NULL`, no unique index) only
+supports this shape -- deduping to one row per (profile, keyword) would
+require dropping or restructuring `job_id`, the exact column the useful
+query depends on: `SELECT profile, keyword, COUNT(DISTINCT job_id) ...
+GROUP BY profile, keyword ORDER BY COUNT(DISTINCT job_id) DESC`. That
+query is impossible to reconstruct after the fact from a deduped table
+without a redundant counter column the schema doesn't have, so
+accumulating is not just simpler, it's the only shape that answers the
+question this table exists to answer. No new write-time guard needed
+either: `ensure_reviewed()` is already idempotent per (job_id, profile)
+(returns the existing variant on a second call, never re-runs
+`run_ladder()`), so P4 fires at most once per (job, profile)
+automatically. `first_logged_at`'s name reads like it expected a
+per-(profile, keyword) dedup that was never built -- flagged as a real,
+harmless naming/intent mismatch, not fixed here (renaming a column
+nothing had ever written to was free before this session but is a real
+migration now that real rows exist).
+
+**Implementation:** `GapLedgerRow` (`db/models.py`, mirrors
+`RubricResultRow`'s shape) + `insert_gap_ledger_entries()` (executemany,
+same pattern as `insert_rubric_results`); `ensure_reviewed()` gains one
+new block, right after the existing `insert_rubric_results()` call and
+before `ctx.conn.commit()`, computing `measure.missing_keywords(result.
+bank, required)` and inserting one `GapLedgerRow` per still-missing
+keyword when non-empty. No schema change. Tests first (hard rule 7): 2
+in `test_db.py` (round-trip, no dedup), 4 in `test_queue_orchestrate.py`
+(logs both keywords for a real known-uncoverable pair reusing this
+file's existing `_EXTRACT_PAYLOAD` fixture; logs nothing when nothing is
+missing; a second `ensure_reviewed()` call logs nothing further,
+idempotency free from the existing early-return; `accepted`/
+`review_status` stay untouched even on a real soft failure). Full suite
+496/496 (up from 491), `ruff check`/`format --check` clean on every file
+touched.
+
+**Verified against a real, production-shaped scratch copy of the real
+db (never the real path itself, per hard rule 13), not just the
+automated suite:** ran `ensure_reviewed()` against a scratch copy for a
+real, previously-untriggered job (2181, Stripe "Software Engineer"),
+real bank/filter/profile config, a fake LLM client supplying
+`required_keywords=["Go", "Rust"]` (chosen directly from this decision's
+own real gap-frequency table above). Real result: variant `passed=False,
+coverage=0.0`, and `gap_ledger` gained exactly 2 real rows,
+`(software_engineer, "Go", 2181)` and `(software_engineer, "Rust",
+2181)` -- confirming the wiring works against the actual production
+schema and bank content, not only a freshly-`init()`'d test db. Scratch
+copy deleted after verification; the real `data/jobengine.db` was never
+opened for write.

@@ -371,6 +371,67 @@ def test_approve_succeeds_with_override_and_marks_variant_accepted(conn):
     assert reloaded.review_status == "approved"
 
 
+# --- D43 (P4): ensure_reviewed() logs still-missing required keywords to
+# gap_ledger after run_ladder() exhausts, unconditional on pass/fail and
+# on D42's soft/hard classification -- see docs/decisions.md D43. Never
+# touches review_status/accepted (that stays exclusively human-driven via
+# D42's approve()).
+
+
+def test_ensure_reviewed_logs_uncovered_keywords_to_gap_ledger(conn):
+    job_id = _seed_job(conn)
+    _seed_base_resume(conn)
+    ctx = _ctx(conn, _FakeClient(_EXTRACT_PAYLOAD))
+
+    orchestrate.ensure_reviewed(ctx, job_id, "software_engineer")
+
+    rows = conn.execute(
+        "SELECT profile, keyword, job_id FROM gap_ledger ORDER BY keyword"
+    ).fetchall()
+    assert [dict(r) for r in rows] == [
+        {"profile": "software_engineer", "keyword": "Go", "job_id": job_id},
+        {"profile": "software_engineer", "keyword": "Kubernetes", "job_id": job_id},
+    ]
+
+
+def test_ensure_reviewed_logs_nothing_when_no_keywords_are_missing(conn):
+    job_id = _seed_job(conn)
+    _seed_base_resume(conn)
+    ctx = _ctx(conn, _FakeClient(_PASSING_EXTRACT_PAYLOAD))
+
+    orchestrate.ensure_reviewed(ctx, job_id, "software_engineer")
+
+    assert conn.execute("SELECT 1 FROM gap_ledger").fetchone() is None
+
+
+def test_ensure_reviewed_second_call_does_not_log_gap_ledger_again(conn):
+    job_id = _seed_job(conn)
+    _seed_base_resume(conn)
+    ctx = _ctx(conn, _FakeClient(_EXTRACT_PAYLOAD))
+    orchestrate.ensure_reviewed(ctx, job_id, "software_engineer")
+
+    orchestrate.ensure_reviewed(
+        _ctx(conn, _FakeClient(_EXTRACT_PAYLOAD)), job_id, "software_engineer"
+    )
+
+    count = conn.execute("SELECT COUNT(*) FROM gap_ledger").fetchone()[0]
+    assert count == 2  # Go, Kubernetes -- not 4
+
+
+def test_ensure_reviewed_does_not_mark_variant_accepted_via_gap_ledger(conn):
+    """D43's decision 1: P4 never touches accepted/review_status, even
+    on a real R001-only (soft) failure -- that stays exclusively
+    human-driven via D42's approve(override_soft_failure=True)."""
+    job_id = _seed_job(conn)
+    _seed_base_resume(conn)
+    ctx = _ctx(conn, _FakeClient(_EXTRACT_PAYLOAD))
+
+    variant = orchestrate.ensure_reviewed(ctx, job_id, "software_engineer")
+
+    assert variant.accepted is None
+    assert variant.review_status == "pending"
+
+
 def test_approve_raises_hard_rubric_failure_even_with_override(conn):
     """override_soft_failure never bypasses a hard (non-R001) failure --
     that's the one case with no override path at all."""

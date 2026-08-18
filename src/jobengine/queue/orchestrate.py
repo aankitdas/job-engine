@@ -23,6 +23,7 @@ from typing import Any
 
 from jobengine.db.models import (
     Application,
+    GapLedgerRow,
     JobResumeVariant,
     QueueEntry,
     RubricResultRow,
@@ -32,6 +33,7 @@ from jobengine.db.models import (
     get_job_resume_variant,
     get_rubric_results,
     insert_application,
+    insert_gap_ledger_entries,
     insert_job_resume_variant,
     insert_rubric_results,
     latest_base_resume,
@@ -45,7 +47,7 @@ from jobengine.pipeline.relevance import RelevanceConfig
 from jobengine.profiles.config import ProfileConfig
 from jobengine.resume.bank import Bank
 from jobengine.resume.render import Identity
-from jobengine.rubric import patch
+from jobengine.rubric import measure, patch
 from jobengine.rubric.rules import has_unrecoverable_rubric_failure
 
 _VARIANTS_OUT_ROOT = Path("resume/rendered/variants")
@@ -186,6 +188,27 @@ def ensure_reviewed(ctx: QueueContext, job_id: int, profile: str) -> JobResumeVa
                     evaluated_at=created_at,
                 )
                 for deficit in result.rubric_result.deficits
+            ],
+        )
+
+    # D43 (P4): log every still-missing required keyword, unconditional
+    # on result.rubric_result.passed (a keyword can be individually
+    # missing even when overall coverage clears R001's 0.70 bar) and on
+    # D42's soft/hard classification (that split governs whether a human
+    # can approve the variant, not whether a gap gets recorded). Never
+    # touches review_status/accepted -- see docs/decisions.md D43.
+    still_missing = measure.missing_keywords(result.bank, required)
+    if still_missing:
+        insert_gap_ledger_entries(
+            ctx.conn,
+            [
+                GapLedgerRow(
+                    profile=profile,
+                    keyword=keyword,
+                    job_id=job_id,
+                    first_logged_at=created_at,
+                )
+                for keyword in still_missing
             ],
         )
 

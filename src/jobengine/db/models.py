@@ -123,6 +123,14 @@ class JobResumeVariant(BaseModel):
     created_at: str
 
 
+class GapLedgerRow(BaseModel):
+    id: int | None = None
+    profile: str
+    keyword: str
+    job_id: int
+    first_logged_at: str
+
+
 class RubricResultRow(BaseModel):
     id: int | None = None
     job_resume_variant_id: int
@@ -599,6 +607,22 @@ def get_rubric_results(
         (job_resume_variant_id,),
     ).fetchall()
     return [RubricResultRow(**dict(row)) for row in rows]
+
+
+def insert_gap_ledger_entries(
+    conn: sqlite3.Connection, rows: list[GapLedgerRow]
+) -> None:
+    """D43 (P4): one plain INSERT per real (job, profile, keyword)
+    occurrence, no dedup/UNIQUE -- see queue/orchestrate.py's P4 site and
+    docs/decisions.md D43 for why: the useful query (uncovered keywords
+    ranked by distinct job count) needs one row per occurrence."""
+    conn.executemany(
+        """
+        INSERT INTO gap_ledger (profile, keyword, job_id, first_logged_at)
+        VALUES (:profile, :keyword, :job_id, :first_logged_at)
+        """,
+        [r.model_dump(exclude={"id"}) for r in rows],
+    )
 
 
 def insert_application(conn: sqlite3.Connection, application: Application) -> int:

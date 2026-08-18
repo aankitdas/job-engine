@@ -4,74 +4,81 @@
 the end via `/checkpoint`. Do not rely on memory of previous sessions.**
 
 Last updated: 2026-08-17
-Current task: **D42: `orchestrate.approve()` now gates on rubric pass/
-soft-fail/hard-fail state, closing the exact real gap D41 found (job
-3950 queued cleanly despite a real R001 hard failure).** Planned before
-any code per hard rule 7/the session protocol; three explicit decisions
-made and recorded, not assumed:
+Current task: **D43: P4 (accept and log) built -- `ensure_reviewed()`
+now logs every still-missing required keyword to `gap_ledger` after
+`run_ladder()` exhausts, scoped to exactly what spec 08 says, no more.**
+Planned before any code per hard rule 7; real numbers gathered read-only
+first, three decisions made explicitly:
 
-**(1) Block outright vs. approvable-with-override -- neither uniformly,
-split by which rule failed.** `specs/08-rubric.md`'s never-built P4
-section already draws this line: *"Mark the variant `passed: false,
-accepted: true` if the deficit is soft, or skip the job entirely if a
-hard rule other than R001 still fails."* D33 independently reached the
-same split demoting R002 but deliberately not R001. Real evidence
-confirms this isn't spec-literalism: of 623 real (job, profile) pairs
-currently passing every B3 filter + the relevance floor, 67 already have
-real extraction done, and **66 of those 67 (98.5%) already fail R001
-coverage before any patching at all** -- and per D29 (P1 is a structural
-no-op against the current bank, P0/P2 can't change which keywords a
-candidate carries) this is a near-exact predictor of post-patch failure,
-not a loose proxy, confirmed directly by both real variants that exist
-(3871, 3950: both hard-fail on exactly `['R001']`). All 11 other gated
-hard rules were checked directly against `select_for_profile()`'s output
-for all 3 profiles: zero failures, for any profile. A uniform hard block
-would reject ~98% of the real queue -- this is a bank-coverage/P4
-problem, not a rare edge case, so R001-only is "soft" (surfaced
-prominently, human-overridable via a distinct second action, marks the
-already-existing-but-unused `job_resume_variants.accepted` column);
-anything else stays hard-blocked, no override.
+**Real numbers changed what this needed to be, not just informed it.**
+Of 623 real (job, profile) pairs passing every B3 filter + the relevance
+floor, 67 already have real extraction done; their pre-patch missing
+keywords (`measure.missing_keywords()`, per D29 a near-exact predictor
+of post-patch state) aggregated by distinct job count: `go` (16 jobs),
+`java` (12), `rust` (12), `typescript` (11), `sql` (8, data_scientist),
+`c++` (7), `react` (6) top the list. **These are not obscure long-tail
+infra terms -- they're mainstream languages `software_engineer`'s bank
+apparently has zero tagged coverage for at all**, and a single read-only
+script already made this legible from n=67 using one existing function.
+So P4's job wasn't discovery (already near-free); it's durability --
+turning this snapshot into a persistent signal across the full future
+population for M1's monthly review, which argued for the lightest
+possible build, confirmed by the numbers rather than assumed.
 
-**(2) Where the gate lives -- `orchestrate.approve()` itself, not just
-the web layer**, because only `orchestrate.approve()` is reachable from
-a future automated path (G3/G4); the web layer (`queue_detail.html`'s
-three-mutually-exclusive-state button rendering) is where "surface
-prominently" actually happens, a UI concern the core function can't own.
+**(1) "Soft deficit" reuses D42's exact classification, but `accepted`
+itself is never auto-set by P4.** Spec 08's P4 text ("mark `accepted:
+true` if the deficit is soft") is the same sentence D42's
+`has_unrecoverable_rubric_failure()` already codifies -- reusing it, not
+a second judgment call. But P4 fires automatically inside
+`ensure_reviewed()`, before any human review; auto-writing
+`accepted=True` there would quietly pre-empt D42's whole point (a human
+must take a distinct second action to approve a known-failing resume).
+**P4 only writes to `gap_ledger`, never touches `review_status`/
+`accepted`** -- a deliberate, explicit divergence from spec 08's literal
+text, not a silent reinterpretation. Gap logging itself is unconditional
+on R001 pass/fail (a keyword can be individually missing even when
+overall coverage clears 0.70), not gated by the soft/hard split at all.
 
-**(3) Autonomy ceiling -- deliberately NOT consumed here, kept
-separable**, same shape as D37's `passes_relevance_floor()` being
-independent from B3's filters: different question (resume quality vs.
-submission automatability), different data availability (ceiling is
-Greenhouse-only, D39; consuming it now means deciding today what happens
-for Ashby's ~51% of the queue, a separate design pass).
-`applications.autonomy_level=0` stays hardcoded, still flagged as a
-distinct follow-up.
+**(2) P4 fires in `orchestrate.ensure_reviewed()`, not inside
+`run_ladder()`** -- `run_ladder()` (`rubric/patch.py`) is deliberately
+pure (no `conn`, no `job_id`, reused by `test_patch.py`'s real-bank
+tests with no db in sight); `ensure_reviewed()` already does the
+parallel thing today (persists `job_resume_variant`/`rubric_results`
+from the ladder's result in one `conn`-having place before one
+`commit()`). `pipeline/batch.py` never calls either at all (D38), so
+the discriminator here is purity, not "reachable from batch" the way it
+was for D42's gate.
 
-New: `rules.has_unrecoverable_rubric_failure()` (`rubric/rules.py`),
-`HardRubricFailureError`/`UnacknowledgedSoftFailureError`
-(`queue/orchestrate.py`), `update_review_status()`'s new optional
-`accepted` param (`db/models.py`, `COALESCE`-guarded, no migration --
-the column already existed). **The existing
-`test_approve_flips_review_status_and_creates_application` test was
-itself exercising the exact bug being fixed** (its fixture is a real
-R001-only failure and the test asserted a bare approve succeeded) --
-split into a without-override-409 test and a with-override-succeeds
-test, not left broken. 14 new tests total, tests-first throughout. Full
-suite 491/491 (up from 477), `ruff check`/`format --check` clean.
-**Verified against the real db, not just the suite:** called
-`orchestrate.approve()` directly on job 3950's real variant with no
-override -- confirmed it now raises `UnacknowledgedSoftFailureError`,
-concrete proof the D41 gap is closed; confirmed no side effect (the
-gate raises before any write). See D42 in docs/decisions.md for the
-complete writeup.
+**(3) `gap_ledger` accumulates one row per real (job, profile, keyword)
+occurrence, no dedup, no migration.** The schema as it already existed
+(`job_id NOT NULL`, no unique index) only supports this shape, and it's
+the only shape that answers the actual useful query ("uncovered
+keywords ranked by distinct job count" is `COUNT(DISTINCT job_id) ...
+GROUP BY profile, keyword`) -- deduping would make that query
+impossible without a redundant counter column. No new write-time guard
+needed: `ensure_reviewed()`'s existing idempotency already caps P4 at
+once per (job, profile).
 
-Next: no next task chosen yet, needs your go-ahead. Same candidates as
-before, now informed by D41/D42: G2 itself (with a clearer picture of
-what it would and wouldn't unblock), the Ashby-ceiling gap, wiring a
-real autonomy_level into `approve()` (deliberately deferred, decision
-3 above), or B3-followup/F2/F3/P4. D40's work was committed and pushed
-last checkpoint; **D41 and D42 (docs + code) are not yet committed** --
-confirm before pushing.
+New: `GapLedgerRow` + `insert_gap_ledger_entries()` (`db/models.py`,
+mirrors `RubricResultRow`); one new block in `ensure_reviewed()`, same
+site as the existing `insert_rubric_results()` call. No schema change.
+6 new tests, tests-first. Full suite 496/496 (up from 491), `ruff
+check`/`format --check` clean. **Verified against a real, production-
+shaped scratch copy of the real db** (never the real path, hard rule
+13): `ensure_reviewed()` against job 2181 (Stripe "Software Engineer"),
+real bank/config, fake client with `required_keywords=["Go", "Rust"]`
+(pulled directly from the real gap-frequency table above) -- real
+result, `gap_ledger` gained exactly the 2 expected rows. Scratch copy
+deleted after. See D43 in docs/decisions.md for the complete writeup.
+
+Next: no next task chosen yet, needs your go-ahead. Candidates, now
+informed by D41/D42/D43: G2 itself, the Ashby-ceiling gap, wiring a
+real `autonomy_level` into `approve()` (deliberately deferred, D42
+decision 3), a small gap_ledger query/report surface for M1 (explicitly
+not built this session, flagged as a possible small follow-on), or
+B3-followup/F2/F3. D40, D41, D42 (docs + all code) were committed
+together last session (`6ef7eb1`); **D43 (docs + code) is not yet
+committed** -- confirm before committing/pushing.
 
 Separately: **B2's Task Scheduler regression is now confirmed fixed, not
 just a positive sign.** Last checkpoint had one real unattended firing
@@ -159,19 +166,25 @@ accessors for `companies`, `jobs`, `outcomes`, `runs`, `job_analysis`,
 models + `insert_job_resume_variant()`, `get_job_resume_variant()`,
 `find_job_resume_variant_by_hash()` (the file-reuse dedup lookup),
 `update_review_status()` (gained an optional `accepted: bool | None =
-None` param this checkpoint, D42, `SET accepted = COALESCE(?,
+None` param in D42, `SET accepted = COALESCE(?,
 accepted)` so `reject()`'s existing calls are unaffected), 
 `insert_rubric_results()`/
 `get_rubric_results()`, `get_job_by_id()`, `latest_base_resume()` (full
 row, not just the version int), `insert_application()`,
 `list_pending_review_queue()`, `list_existing_variant_pairs()`; new this
-session, C4: `RelevanceScore`/`RankableScore` models +
+checkpoint, D43: `GapLedgerRow` model + `insert_gap_ledger_entries()`
+(executemany, mirrors `insert_rubric_results()`'s pattern, no dedup by
+design -- see D43); new this session, C4: `RelevanceScore`/
+`RankableScore` models +
 `upsert_relevance_score()`, `get_relevance_score()`,
 `list_relevance_scores_for_cutoff()` (joins `jobs` for the
 `first_seen_at` tiebreak), `update_relevance_selection()`),
 `__main__.py` (`uv run python -m jobengine.db {init,migrate,stats}`).
-Tests: `test_db.py` 41 (re-verified live at this checkpoint, +2 this
-checkpoint for `update_review_status()`'s new param), `test_db_migrate.py`
+Tests: `test_db.py` 42 (up from 41, +1 net this checkpoint for
+`insert_gap_ledger_entries()`/`GapLedgerRow` -- D43 added 1 new test
+here, the round-trip case; the idempotency/no-missing-keywords cases
+live in `test_queue_orchestrate.py` instead since they need
+`ensure_reviewed()`), `test_db_migrate.py`
 9.
 
 **resume/** (`src/jobengine/resume/`): `bank.py` (pydantic bank schema,
@@ -393,25 +406,32 @@ process); `ensure_reviewed(ctx, job_id,
 profile)` (the lazy-trigger entry point: ensures `job_analysis` exists
 via C3's `analyze_job()`, then ensures a `job_resume_variant` exists via
 D3/D4's `run_ladder()`, idempotent, real deficits persisted to
-`rubric_results`); `approve()`/`reject()` (review decisions: reject sets
+`rubric_results`; new this checkpoint, D43 (P4): also computes
+`measure.missing_keywords(result.bank, required)` after the ladder
+returns and, if non-empty, logs each to `gap_ledger` via the new
+`insert_gap_ledger_entries()` -- unconditional on `passed`/D42's soft-
+hard split, never touches `accepted`/`review_status`, see D43); `approve()`/`reject()` (review decisions: reject sets
 `review_status='rejected'` and creates no `applications` row,
 deliberately, see D35; approve sets `review_status='approved'` and
 inserts an `applications` row `status='queued', autonomy_level=0` --
-new this checkpoint, D42: approve() now gates on rubric state first via
+D42: approve() gates on rubric state first via
 `rules.has_unrecoverable_rubric_failure()`, raising
 `HardRubricFailureError` for any hard failure other than R001, never
 overridable, or `UnacknowledgedSoftFailureError` for an R001-only
-failure unless the new keyword-only `override_soft_failure=True` is
+failure unless the keyword-only `override_soft_failure=True` is
 passed, in which case the variant is also marked `accepted=True`);
 `list_queue()` (thin wrapper over `db/models.py`'s
 `list_pending_review_queue()`). No `__main__.py`: only the web routes
-and tests call this module. Tests: `test_queue_orchestrate.py`, 11
-tests (up from 7, +4 this checkpoint for D42's three approve() states),
-every one exercising the real bank/render/PDF/score pipeline (there is
-no lighter mock for `run_ladder()`, matching `test_patch.py`'s own
-precedent), LLM calls mocked via a stage-aware `_FakeClient` that
-inspects the requested schema's fields to serve both the extract and
-rephrase stages correctly from one fake.
+and tests call this module. Tests: `test_queue_orchestrate.py`, 15
+tests (up from 11, +4 this checkpoint for D43's gap_ledger logging:
+logs both keywords for a real known-uncoverable pair, logs nothing when
+nothing's missing, a second call logs nothing further, `accepted`/
+`review_status` stay untouched), every one exercising the real
+bank/render/PDF/score pipeline (there is no lighter mock for
+`run_ladder()`, matching `test_patch.py`'s own precedent), LLM calls
+mocked via a stage-aware `_FakeClient` that inspects the requested
+schema's fields to serve both the extract and rephrase stages correctly
+from one fake.
 
 **web/** (`src/jobengine/web/`, new this session (F1), updated this
 session (C4 follow-up, D37)): `app.py` —
@@ -497,8 +517,8 @@ lazily-rendered candidates, `{job_id}/{profile}/candidate_{tiers}.
 `3871/software_engineer/candidate_P0_P1_P2_P3.{docx,pdf}` (this
 session's real worked-example verification, see below).
 
-**Full suite: 491/491 passing (up from 477 at last checkpoint, +14 this
-checkpoint for D42), `ruff check src/ tests/` clean, `ruff format
+**Full suite: 496/496 passing (up from 491 at last checkpoint, +5 this
+checkpoint for D43), `ruff check src/ tests/` clean, `ruff format
 --check` clean on every file this checkpoint touched** (the
 pre-existing `RUF059`-adjacent formatting-only diffs in `test_db.py`/
 `test_db_migrate.py`/`test_profiles_brief.py`/`test_render.py`/
@@ -523,11 +543,14 @@ distinct jobs (unchanged), `keyword_corpus` 219 rows (unchanged),
 F1's dedup, D35), `applications` 1 (unchanged since D41: the first real
 `applications` row this project has ever written outside a test, id 1,
 job 3950, `autonomy_level=0 status='queued'`, still `review_status=
-'approved'`/`accepted=NULL` from before D42's gate existed -- D42's own
-real-db verification this checkpoint deliberately caused zero writes,
-confirmed directly: it calls `approve()` a second time on this same
-variant with no override and checks that it now raises rather than
-succeeding again), 4 `base_resumes` rows (unchanged). `daily_cap`
+'approved'`/`accepted=NULL` from before D42's gate existed), `gap_ledger`
+**still 0 rows in the real db** -- D43's verification deliberately ran
+against a scratch copy only (per hard rule 13), never the real path, so
+the real `gap_ledger` stays empty until a real `ensure_reviewed()` call
+against a job with a genuine coverage gap happens for real (very likely
+soon given D42's own 66/67 number: the next real `/jobs/{id}/{profile}`
+visit on almost any untriggered pair will populate it), 4 `base_resumes`
+rows (unchanged). `daily_cap`
 is still `null`; `min_relevance_score: 20` (D37) remains the only live
 relevance-score gate on `web/app.py`'s `_new_pairs()`; D40's seniority
 exclusion is a second, independent gate upstream of it, in
@@ -793,13 +816,30 @@ B3 filter + the relevance floor): **293 of those (51.1%) are
   returned `PatchResult`/working `Bank`; persisting it to the real bank
   file is a separate, deliberate, not-yet-built action. See D30 in
   docs/decisions.md.
-- **P4 (accept and log to `gap_ledger`) is still not built.** Spec 08
-  only reaches P4 after P3's rewrite budget (2 calls) is exhausted or
-  every attempt is discarded; "mark the variant `passed: false, accepted:
-  true` if the deficit is soft" requires a definition of "soft" this
-  session didn't make without asking. `gap_ledger`'s schema already
-  exists (`job_id`, `profile`, `keyword`, `first_logged_at`); nothing
-  writes to it yet.
+- **RESOLVED this checkpoint (D43), not still open:** P4 (accept and
+  log to `gap_ledger`) used to be flagged here as unbuilt, deliberately,
+  since "soft deficit" needed a definition this project hadn't made
+  without asking. D42 already made that exact call (R001-only is soft)
+  for the approve() gate; D43 reused it for P4's gap-logging condition
+  rather than treating it as a second open question. **Deliberately
+  narrower than spec 08's literal text, though:** P4 logs to
+  `gap_ledger` but does NOT auto-mark the variant `accepted: true` the
+  way spec 08 says -- that would pre-empt D42's human-driven override,
+  see D43's decision 1 for the full reasoning. `ensure_reviewed()` now
+  calls `measure.missing_keywords()` after every `run_ladder()` call and
+  logs whatever's still missing, unconditional on pass/fail. Real
+  numbers gathered before building: of the current queue's 67 pairs with
+  real extraction done, the top uncovered keywords for
+  `software_engineer` are mainstream languages (Go/Java/Rust/TypeScript,
+  10+ distinct jobs each) the bank has zero tagged coverage for, not
+  obscure long-tail terms -- see D43 in docs/decisions.md for the full
+  table. No query/report surface built on top of `gap_ledger` yet
+  (M1 is a human-at-the-terminal session per docs/architecture.md, not
+  scripted here); the real db's `gap_ledger` itself is still 0 rows as
+  of this checkpoint since verification ran against a scratch copy only
+  (hard rule 13) -- it'll start filling the next time a real
+  `ensure_reviewed()` call hits an uncovered job, which given the 66/67
+  number is likely to be almost immediately.
 - **P1 (swap, `src/jobengine/rubric/patch.py`'s `apply_p1`) is a real,
   structural no-op against the bank as it exists today, for every role
   and every profile, not a bug.** `measure.select_for_profile()` (D28
@@ -1648,6 +1688,44 @@ B3 filter + the relevance floor): **293 of those (51.1%) are
 ## Session log
 
 (Newest first. Date, task id, what changed, what to do next.)
+
+- 2026-08-17, D43 (done): Built P4 (accept and log), scoped to exactly
+  spec 08's text after checking the real numbers first. Read-only
+  analysis (bank + already-stored `job_analysis`, zero db writes)
+  against the 67 real approvable-queue pairs with extraction done showed
+  `software_engineer`'s top uncovered keywords are Go (16 distinct
+  jobs), Java (12), Rust (12), TypeScript (11) -- mainstream languages,
+  not long-tail infra terms, already legible from one script using an
+  existing function. Reframed the task: P4's value isn't discovery
+  (near-free already), it's durability -- a persistent log across the
+  full future population for M1, arguing for the lightest possible
+  build. Three decisions: (1) reuse D42's exact soft/hard classification
+  for what "soft" means, but P4 never auto-sets `accepted`/
+  `review_status` -- that stays exclusively human-driven via D42's
+  approve() override, a deliberate divergence from spec 08's literal
+  "mark accepted: true" clause, since auto-setting it would pre-empt the
+  whole point of D42's gate; (2) fires in `orchestrate.ensure_reviewed()`
+  not inside `run_ladder()` (deliberately pure, no conn/job_id, reused
+  by `test_patch.py`'s db-free integration tests); (3) `gap_ledger`
+  accumulates one row per (job, profile, keyword) occurrence, no dedup,
+  no migration -- the schema's existing shape (`job_id NOT NULL`, no
+  unique index) is the only one that answers "uncovered keywords ranked
+  by distinct job count" via `COUNT(DISTINCT job_id)`.
+  New: `GapLedgerRow`/`insert_gap_ledger_entries()` (`db/models.py`),
+  one new block in `ensure_reviewed()` right after the existing
+  `insert_rubric_results()` call. No schema change. 6 new tests, tests-
+  first. Full suite 496/496 (up from 491), ruff clean. Verified against
+  a real, production-shaped scratch copy (never the real db path): real
+  job 2181 (Stripe), real bank/config, `required_keywords=["Go", "Rust"]`
+  pulled from the real gap-frequency table -- `gap_ledger` gained
+  exactly the 2 expected real rows. Full writeup: D43, docs/decisions.md.
+  Next: no next task chosen. Real db's `gap_ledger` is still 0 rows
+  (verification stayed on a scratch copy per hard rule 13) -- will start
+  filling on the next real `/jobs/{id}/{profile}` visit given the 66/67
+  number. Candidates for next: G2, the Ashby-ceiling gap, wiring
+  `autonomy_level` into `approve()`, a small gap_ledger query surface
+  for M1 (flagged, not built), or B3-followup/F2/F3. D43 (docs + code)
+  not yet committed -- confirm before committing/pushing.
 
 - 2026-08-17, D42 (done): Closed the exact gap D41 found --
   `orchestrate.approve()` never checked `variant.passed`. Planned in

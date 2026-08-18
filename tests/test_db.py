@@ -7,6 +7,7 @@ from jobengine.db.models import (
     Application,
     BaseResume,
     Company,
+    GapLedgerRow,
     Job,
     JobResumeVariant,
     Outcome,
@@ -21,6 +22,7 @@ from jobengine.db.models import (
     get_rubric_results,
     insert_application,
     insert_base_resume,
+    insert_gap_ledger_entries,
     insert_job_resume_variant,
     insert_outcome,
     insert_rubric_results,
@@ -527,6 +529,37 @@ def test_insert_and_get_rubric_results_round_trip(conn_with_job_and_base_resume)
     r001 = next(r for r in fetched if r.rule_id == "R001")
     assert r001.passed is False
     assert r001.measurement == 0.14
+
+
+def test_insert_and_query_gap_ledger_entries(conn_with_job_and_base_resume):
+    """D43 (P4): one row per real (job, profile, keyword) occurrence, no
+    dedup at write time -- the useful query is COUNT(DISTINCT job_id)
+    per (profile, keyword), which needs every occurrence kept."""
+    conn, job_id, _ = conn_with_job_and_base_resume
+    insert_gap_ledger_entries(
+        conn,
+        [
+            GapLedgerRow(
+                profile="software_engineer",
+                keyword="Go",
+                job_id=job_id,
+                first_logged_at="2026-08-17T00:00:00+00:00",
+            ),
+            GapLedgerRow(
+                profile="software_engineer",
+                keyword="Kubernetes",
+                job_id=job_id,
+                first_logged_at="2026-08-17T00:00:00+00:00",
+            ),
+        ],
+    )
+    rows = conn.execute(
+        "SELECT profile, keyword, job_id FROM gap_ledger ORDER BY keyword"
+    ).fetchall()
+    assert [dict(r) for r in rows] == [
+        {"profile": "software_engineer", "keyword": "Go", "job_id": job_id},
+        {"profile": "software_engineer", "keyword": "Kubernetes", "job_id": job_id},
+    ]
 
 
 def test_get_job_by_id_returns_none_when_absent(conn):
