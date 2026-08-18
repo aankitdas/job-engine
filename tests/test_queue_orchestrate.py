@@ -160,7 +160,7 @@ class _FakeClient:
     """Serves both the extract stage (C3) and the rephrase stage (D4,
     P3) from one client, since run_ladder() may reach P3 when P0-P2
     can't close a real deficit -- exactly what _EXTRACT_PAYLOAD's real
-    Go/Kubernetes gap does. Picks the right payload by inspecting the
+    Go/Rust gap does. Picks the right payload by inspecting the
     requested schema's field names (kwargs["format"]), same signal
     LocalProvider itself uses to validate the response, rather than
     assuming call order."""
@@ -184,14 +184,19 @@ class _FakeClient:
 
 
 # Deliberately a real, known gap: the real bank's software_engineer
-# content has no Go/Kubernetes coverage (confirmed live this session
-# against real job_id 3871), so this reliably produces a genuine R001
-# deficit -- a meaningful, non-trivial rubric_results row, not a
-# fully-passing no-op.
+# content has no Go/Rust coverage (D43's own real gap-frequency table:
+# these are the #1 and #2 most frequently uncovered real keywords, 16
+# and 12 distinct jobs respectively), so this reliably produces a
+# genuine R001 deficit -- a meaningful, non-trivial rubric_results row,
+# not a fully-passing no-op. Was ["Go", "Kubernetes"] until D47's real
+# bank retag added a genuine Kubernetes tag (b_bantrly_01), which made
+# this fixture only half-uncovered and broke the exact-2-keyword
+# assertions below; Go/Rust re-confirmed still fully uncovered against
+# the retagged bank via measure.missing_keywords(), not reused blindly.
 _EXTRACT_PAYLOAD = {
-    "required_keywords": ["Go", "Kubernetes"],
+    "required_keywords": ["Go", "Rust"],
     "preferred_keywords": [],
-    "tech_stack": ["Go", "Kubernetes"],
+    "tech_stack": ["Go", "Rust"],
 }
 
 # No required keywords -> R001 coverage is trivially 1.0 -> a genuinely
@@ -226,7 +231,7 @@ def test_ensure_reviewed_triggers_extraction_and_persists_variant(conn):
 
     assert variant.job_id == job_id
     assert variant.review_status == "pending"
-    assert variant.passed is False  # real R001 deficit, Go/Kubernetes uncovered
+    assert variant.passed is False  # real R001 deficit, Go/Rust uncovered
     assert client.calls  # extraction really called the (fake) model
     assert get_job_analysis(conn, job_id, "software_engineer") is not None
 
@@ -390,7 +395,7 @@ def test_ensure_reviewed_logs_uncovered_keywords_to_gap_ledger(conn):
     ).fetchall()
     assert [dict(r) for r in rows] == [
         {"profile": "software_engineer", "keyword": "Go", "job_id": job_id},
-        {"profile": "software_engineer", "keyword": "Kubernetes", "job_id": job_id},
+        {"profile": "software_engineer", "keyword": "Rust", "job_id": job_id},
     ]
 
 
@@ -415,7 +420,7 @@ def test_ensure_reviewed_second_call_does_not_log_gap_ledger_again(conn):
     )
 
     count = conn.execute("SELECT COUNT(*) FROM gap_ledger").fetchone()[0]
-    assert count == 2  # Go, Kubernetes -- not 4
+    assert count == 2  # Go, Rust -- not 4
 
 
 def test_ensure_reviewed_does_not_mark_variant_accepted_via_gap_ledger(conn):

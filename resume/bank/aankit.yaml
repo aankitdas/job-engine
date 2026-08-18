@@ -53,7 +53,7 @@ roles:
                FastAPI that separated transcription from LLM scoring across
                8 K-12 assessment modules, cutting audio API costs and
                improving rubric accuracy"
-        keywords: [Python, FastAPI, LLM, speech-to-text, API design]
+        keywords: [Python, FastAPI, LLM, speech-to-text, API design, SQL, Pandas, Docker, Kubernetes, PostgreSQL]
         evidence: "internal"
         profiles: [ai_ml_engineer, software_engineer]
 
@@ -67,7 +67,7 @@ roles:
                combining silence-boundary audio chunking, timestamp
                deduplication, and a sliding guardrail text window,
                eliminating false positives during real-time streaming"
-        keywords: [VAD, real-time streaming, audio chunking]
+        keywords: [VAD, real-time streaming, audio chunking, text-to-speech, STT, TTS]
         evidence: "internal"
         profiles: [ai_ml_engineer, software_engineer]
 
@@ -80,7 +80,7 @@ roles:
                TDT, Whisper, AssemblyAI, and Gemini with quality-based
                fallback and config-driven session health checks, letting
                engines swap with zero code changes"
-        keywords: [adapter registry, fallback, config-driven]
+        keywords: [adapter registry, fallback, config-driven, REST, API, JSON, configuration, Python]
         evidence: "internal"
         profiles: [ai_ml_engineer, software_engineer]
 
@@ -95,7 +95,7 @@ roles:
                intelligibility, naturalness, pacing, and latency per K-12
                grade band, producing cost-quality comparisons that guided
                engine selection"
-        keywords: [text-to-speech, evaluation rubric]
+        keywords: [text-to-speech, evaluation rubric, Model armour, model architecture, RAG]
         evidence: "internal"
         profiles: [ai_ml_engineer, data_scientist]
 
@@ -113,7 +113,7 @@ roles:
                468 controlled experiments on 3 open-source models,
                quantifying quality, consistency, and hallucination
                trade-offs"
-        keywords: [LLM-as-judge, embeddings, evaluation pipeline]
+        keywords: [LLM-as-judge, embeddings, evaluation pipeline, Langchain, Langgraph, Knowledge graph, LLMs, QLORA, Finetuning]
         evidence: "internal"
         profiles: [ai_ml_engineer, data_scientist]
 
@@ -168,7 +168,7 @@ roles:
                architecture trained on modern GPUs in under 20 seconds per
                epoch to denoise and recover the angular power spectrum
                from simulated maps"
-        keywords: [UNet, neural architecture, GPU training]
+        keywords: [Python, PyTorch, UNet, neural architecture, GPU training]
         evidence: "internal"
         profiles: [ai_ml_engineer]
 
@@ -197,7 +197,7 @@ roles:
                scripting to benchmark model performance across ells,
                detectors, and feature configurations at multiple
                resolutions"
-        keywords: [Hydra, automation, hyperparameter sweep]
+        keywords: [Hydra, automation, hyperparameter sweep, Bash, Git]
         evidence: "internal"
         profiles: [ai_ml_engineer, software_engineer]
 
@@ -280,7 +280,7 @@ roles:
       text: "Developed a machine learning segmentation model and benchmark
              dataset for tracking early plant growth from time-lapse
              images"
-      keywords: [machine learning, segmentation, agriculture]
+      keywords: [machine learning, image segmentation, agriculture]
       status: verified
     bullets:
       - id: b_unl_01
@@ -292,7 +292,7 @@ roles:
                EmergeNet, a segmentation model for agricultural data that
                achieved 99.4 percent IoU against a 69 percent baseline for
                a standard UNet"
-        keywords: [segmentation, computer vision, EmergeNet]
+        keywords: [segmentation, computer vision, EmergeNet, OpenCV, Numpy, TensorFlow]
         evidence: "https://www.frontiersin.org/journals/plant-science/articles/10.3389/fpls.2023.1084778/full"
         profiles: [ai_ml_engineer, data_scientist]
 

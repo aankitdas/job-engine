@@ -4,92 +4,84 @@
 the end via `/checkpoint`. Do not rely on memory of previous sessions.**
 
 Last updated: 2026-08-18
-Current task: **D45: all 10 stale `job_resume_variants` rows
-(rendered before a real `identity.toml` correction) invalidated and
-re-rendered for real, against the real `data/jobengine.db`, after a
-read-only-first plan and your explicit confirmation per hard rule 13.**
-7 deleted (nothing referenced them, `ensure_reviewed()` rebuilds them
-lazily on next visit); 3 re-rendered in place (jobs 3950/4109/4041,
-referenced by real `applications` rows 1/2/3).
+Current task: **D47: 8 real `job_resume_variants` rows re-checked
+against a real bank retag (missing tech-name tags added -- PyTorch,
+SQL, others), 4 deleted, 4 re-rendered in place, after a read-only-
+first plan, real before/after numbers shown up front, and your explicit
+confirmation per hard rule 13. Unlike D45, this retag moves real rubric
+math, and the before/after showed a genuinely mixed result, not a
+clean fix.**
 
-**The problem was a real, visible, wrong claim on every rendered page,
-not a cosmetic diff.** `identity.toml`'s `work_authorization.statement`
-changed from a version implying no sponsorship would ever be needed to
-the accurate "On F1 OPT STEM." `render.py` prints this verbatim in
-every resume's header. Confirmed directly against the real file before
-touching anything: variant 1's actual PDF read `On F1 OPT STEM,
-Eligible to work in the US without sponsorship | TX` against the
-corrected `identity.toml`'s bare `"On F1 OPT STEM"`. All 10 real rows
-predated the fix.
+**Real before/after, computed read-only before anything ran:** of 8
+variants, 2 genuinely fixed off a stale value, 2 more improved but not
+closed, and 4 unchanged for two different real reasons. **Reason 1:**
+3 unchanged variants need keywords (Go/Terraform/SSO/SCIM/OAuth/OIDC/
+RBAC, JavaScript, R) that were never in scope for an "add missing ML
+tool tags" retag -- real content gaps, not a retag miss; fabricating
+tags without real content would violate hard rule 2. **Reason 2, two
+structural findings surfaced by the numbers and checked directly, not
+assumed:** (a) job 3917 (`data_scientist`, needs SQL) stayed unchanged
+because the bullet that now carries `SQL` (`b_bantrly_01`) isn't
+tagged `data_scientist` in its `profiles` list -- retagging elsewhere
+in the bank can't fix a bullet a `data_scientist` job structurally
+never sees; whether that bullet's SQL usage genuinely belongs on a
+data-scientist-framed resume is a real content call, surfaced for you,
+not decided here. (b) job 4630 (`software_engineer`, needs PyTorch/
+TensorFlow/XGBoost/Spark) stayed at 0.000 and re-rendering it could not
+have changed that -- `PyTorch` is correctly `ai_ml_engineer`-only in
+the bank, not a retag gap; this is the same job from last checkpoint's
+routing investigation, and its real fix is reviewing `(4630,
+ai_ml_engineer)`, still sitting live in the queue, not a data
+migration.
 
-**Decision 1: delete-and-defer for the 7 non-approved rows now, not a
-staleness-hash column.** First time `identity.toml` has ever changed in
-this project's real history -- a hash column would solve a problem
-observed once. The two future triggers you named aren't the same shape
-of risk either: identity changes are rare/manual/self-noticed; bank
-changes are more frequent and can change real keyword coverage, not
-just a header line, so a real mechanism worth building should cover
-both under one coherent hash -- a bigger design question than this
-data-fix should absorb on the side. Flagged as a real, deliberately-
-deferred follow-up.
+**Mechanics identical to D45, different (larger) row set** -- the real
+db grew to 8 `job_resume_variants` between checkpoints from real usage.
+4 approved rows (ids 2, 8, 10, 13; jobs 3950/4109/4041/4306), referenced
+by 4 real `applications` rows, re-rendered in place via `patch.
+run_ladder()` called directly (same mechanism as D45) and `UPDATE`d by
+id, `applications` untouched; 4 pending rows (ids 11, 12, 14, 15; jobs
+3904/3917/4630/2009) deleted outright, nothing referenced them. Checked
+D45's file-dedup gotcha again before doing anything -- clean this time,
+no approved row shared a physical file with a row being deleted.
 
-**Decision 2 (confirmed by asking): the 3 approved rows are re-rendered
-in place, not deleted.** Not just a preference -- SQLite's `PRAGMA
-foreign_keys = ON` (every `connect()` call) makes deleting them
-literally impossible while `applications` references them, confirmed
-empirically against a scratch copy first: `DELETE FROM
-job_resume_variants WHERE id = 2` raised `FOREIGN KEY constraint
-failed` immediately. Asked whether the 3 should be refreshed or left
-frozen as a historical record; answer was refresh, since none of the 3
-have `submitted_at` set (all `NULL`) -- nothing marked submitted
-through this system yet, so correcting known-wrong content beats
-preserving it.
+**Run for real, with the real local model:** all 4 re-renders matched
+the pre-patch prediction shown in the plan exactly (coverage
+0.10/0.50/0.50/0.333). **Unlike D45, `selection_hash` changed for all
+4** -- expected and flagged in the plan up front: P0's reorder sorts by
+keyword score, which the retag changed, so even an unchanged bullet
+*set* can produce a different *order* and hash. Verified after commit:
+counts correct, `applications` still 4 with all FKs resolving, `PRAGMA
+foreign_key_check` clean. Full db backup to scratchpad before any
+write, same as D45.
 
-**A real gotcha caught by reading actual file paths before deleting
-anything, not assumed:** F1's dedup (D35) meant rows 1, 2, 4, 5, 8, 9
-all shared one physical file (job 3871's), and two of the three
-*approved* rows (2, 8) were among them -- deleting that file outright
-would have broken the surviving approved rows even though their db rows
-were untouched. Avoided by calling `patch.run_ladder()` directly for
-the 3 re-renders (bypassing `ensure_reviewed()`'s dedup-lookup), so each
-landed on its own fresh, independent file. No rendered files were
-deleted this session at all -- old, now-orphaned files under
-`variants/3902/`/`variants/4152/` are left on disk, same already-known
-clutter class D44 flagged for this directory.
+**A real regression the full-suite re-run caught, not assumed clean:**
+2 tests failed after the retag -- both hard-coded `["Go", "Kubernetes"]`
+as a controlled fully-uncovered-keyword example against the *real*
+bank, and the retag gave `Kubernetes` genuine coverage
+(`b_bantrly_01`), breaking their exact-2-keyword assertions. Not a bug
+in this session's data operation or in the retag -- a correct
+consequence of the bank getting more accurate, caught exactly the way
+the suite is supposed to catch it. Fixed by swapping to `["Go",
+"Rust"]` (D43's own #1/#2 real gap-frequency keywords, re-confirmed
+still fully uncovered before use, not reused blindly), updated in both
+`test_queue_orchestrate.py` and its sibling copy in `test_web_app.py`
+for consistency. Full suite re-confirmed green: 504/504, ruff clean.
 
-**Run for real, with the real local model, not a stand-in:** Ollama was
-reachable this session via the configured `OLLAMA_BASE_URL`; all three
-re-renders genuinely re-attempted P3 against the real model, same as
-the originals. All three came back with `selection_hash` byte-identical
-to their pre-fix value and identical score/coverage/`passed`/
-`patch_tiers_applied` -- confirming, not just assuming, that
-`identity.toml` content has zero influence on P0-P3's keyword-driven
-selection, only on the rendered header. Verified after commit, not just
-planned: `job_resume_variants` count is 3, `applications` count
-unchanged at 3, `PRAGMA foreign_key_check` returns `[]`, and all three
-new PDFs' first-page text reads `On F1 OPT STEM | TX`, confirmed by
-direct `pdfplumber` extraction. A full backup of the real db was taken
-to the scratchpad directory before any write, beyond the transaction
-itself. `gap_ledger` (19 rows) and `jobs` were unaffected, as expected.
-Full suite re-run after (no source changed): 499/499, ruff clean. See
-D45 in docs/decisions.md for the complete writeup, including why the 4
-equally-stale `base_resumes` rows were deliberately left out of this
-session's scope (no FK entanglement, spec 09 already expects a new
-version rather than an overwrite).
+See D47 in docs/decisions.md for the complete writeup.
 
-Next: no next task chosen yet, needs your go-ahead. Candidates, now
-informed by D41-D45: G2 itself, the Ashby-ceiling gap, wiring a real
-`autonomy_level` into `approve()` (deliberately deferred, D42 decision
-3), the approve()-called-twice guard (D44), an autonomy-ceiling display
-on the approved-state view (D44), regenerating the 4 stale
-`base_resumes` (D45), a small gap_ledger query/report surface for M1,
-a real staleness-hash mechanism if this recurs (D45 decision 1), or
-B3-followup/F2/F3. D40-D43 (docs + all code) are committed (`8cccb16`,
-`6ef7eb1`, `72974fe`); **D44 (docs + code) is still not yet
-committed**, alongside D45's own docs write-up (D45 itself has no
-source code to commit -- it was a real, already-executed data operation
-against `data/jobengine.db`, not a code change) -- confirm before
-committing/pushing.
+Next: no next task chosen yet, needs your go-ahead. Same open items as
+last checkpoint (R012/R013 text still needed for `RULE_INFO`, reviewing
+the live `(4630, ai_ml_engineer)` pairing, the queue-list multi-profile
+gap, G2, the Ashby-ceiling gap, `autonomy_level` wiring, the
+approve()-called-twice guard, `base_resumes` regeneration [now doubly
+stale -- identity text and bank tags both], a real staleness-hash
+mechanism, a gap_ledger query surface, B3-followup/F2/F3), plus new
+from this session: **the `data_scientist`/`b_bantrly_01`/SQL profile-
+tagging call above.** D40-D43 committed (`8cccb16`, `6ef7eb1`,
+`72974fe`); D44+D45 committed together (`36faa77`); **D46 and D47 (docs
++ code, where applicable) are not yet committed, and
+`resume/bank/aankit.yaml`'s own retag is still uncommitted too** --
+confirm before committing/pushing.
 
 Separately: **B2's Task Scheduler regression is now confirmed fixed, not
 just a positive sign.** Last checkpoint had one real unattended firing
@@ -231,11 +223,16 @@ strict start-date monotonicity to date-range-overlap tolerance, see D29);
 models, `score_resume()` orchestrator; R002 (front-load) removed from
 `score_resume()`'s `hard_failures` list per D33 in docs/decisions.md,
 `check_r002()` itself unchanged and still directly tested, `front_load`
-still fully weighted 25/100 in score.py; new this checkpoint, D42:
+still fully weighted 25/100 in score.py;
 `has_unrecoverable_rubric_failure(hard_failures) -> bool`, True for any
 rule other than R001 -- the soft/hard split `queue/orchestrate.py`'s
-`approve()` now gates on, reusing spec 08's own never-built P4
-language);
+`approve()` gates on, reusing spec 08's own never-built P4 language
+(D42); new this checkpoint, D46: `RuleInfo` model + `RULE_INFO: dict[str,
+RuleInfo]`, human-readable name/description per rule for the review
+page, text quoted verbatim from spec 08's own table -- 11 of 13 entries,
+`R001` through `R011` inclusive; `R012`/`R013` deliberately absent
+pending real text from the user, spec 08's own words for both too
+terse to build a non-invented explanation from);
 `score.py` (weighted 0-100 score
 per spec 08's table); `patch.py` (`apply_p0`/`apply_p1`/`apply_p2`
 implement the deterministic P0-P2 patch ladder from D3; new this
@@ -255,9 +252,8 @@ persistence to the real `resume/bank/aankit.yaml` from here either
 (confirmed by asking not to
 wire up in D4, see D30); `__main__.py` (CLI: `uv run python -m
 jobengine.rubric {score,explain,patch}`; `patch` only ever runs dry-run
-today). `tests/test_rubric.py`: 48 tests (re-verified live at this
-checkpoint; +5 this checkpoint for `has_unrecoverable_rubric_failure()`,
-D42). `tests/test_patch.py`: 51
+today). `tests/test_rubric.py`: 52 tests (up from 48, +4 this checkpoint
+for `RULE_INFO`, D46). `tests/test_patch.py`: 51
 tests (up from 14), including the real-bank `run_ladder` integration
 tests plus an extensive traceability-guard battery. (Corrected from
 41/50 at this checkpoint: actual counts drifted from what was recorded
@@ -493,11 +489,14 @@ redirect to `/` is unchanged, that vanishing act is deliberate (D35).
 `JOBENGINE_DB_PATH` env var overrides `DEFAULT_DB_PATH` for manual
 testing against a scratch copy. `_LIST_WINDOW_DAYS` now imports
 `pipeline/batch.py`'s `WINDOW_DAYS` (D38) instead of hardcoding its own
-copy. `uv run uvicorn jobengine.web.app:app --reload` (CLAUDE.md's
-already-documented dev command). Tests: `test_web_app.py`, 20 tests (up
-from 17, +3 this checkpoint for D44's redirect target and the new
-approved-state branch, one on each side: content present once approved,
-absent before), covering first-visit trigger, second-visit idempotency,
+copy. `queue_detail()` passes `rubric.rules.RULE_INFO` into the
+template context this checkpoint (D46) so "Hard failures" shows a
+human-readable name/explanation per rule alongside the existing terse
+`detail` text; `.rule-explanation` CSS added. `uv run uvicorn
+jobengine.web.app:app --reload` (CLAUDE.md's already-documented dev
+command). Tests: `test_web_app.py`, 21 tests (up from 20, +1 this
+checkpoint for D46's friendly-rule-name rendering), covering first-visit
+trigger, second-visit idempotency,
 approve/reject state transitions and their `applications`-row side
 effects, the list page dropping a rejected job, `_new_pairs()`'s
 `passes_all_filters()` gating (a clean untriggered job appears as "not
@@ -556,37 +555,38 @@ of truth) but real disk clutter accumulating every test run since
 F1 shipped; worth scoping the output root into `QueueContext` (or a
 test fixture override) if it ever needs cleaning up for real.
 
-**Full suite: 499/499 passing (up from 496 at last checkpoint, +3 this
-checkpoint for D44), `ruff check src/ tests/` clean, `ruff format
---check` clean on every file this checkpoint touched** (the
-pre-existing `RUF059`-adjacent formatting-only diffs in `test_db.py`/
-`test_db_migrate.py`/`test_profiles_brief.py`/`test_render.py`/
-`test_slop_lint.py` noted at past checkpoints are untouched by this
-checkpoint's own edits, confirmed by only running `ruff format` against
-the specific files this checkpoint changed rather than the whole tree).
+**Full suite: 504/504 passing (up from 499 two checkpoints ago, net
+unchanged this checkpoint -- D47 added 0 net tests, but did fix 2 real
+regressions the retag caused, see above), `ruff check src/ tests/`
+clean, `ruff format --check` clean on every file this checkpoint
+touched** (the pre-existing `RUF059`-adjacent formatting-only diffs in
+`test_db.py`/`test_db_migrate.py`/`test_profiles_brief.py`/
+`test_render.py`/`test_slop_lint.py` noted at past checkpoints are
+untouched by this checkpoint's own edits).
 
-**`data/jobengine.db` real accumulated state, verified this
-checkpoint, including this session's own real D45 write:** 15 companies
-(unchanged), 4685 jobs (up from 4682 -- a real `sync` firing happened
-during this session, not from anything this session did), 33 `runs`
-rows (unchanged, that sync firing didn't add a new row by the time this
-was checked -- worth a glance next checkpoint if `runs` still reads 33),
-`relevance_scores` 1029 rows/951 distinct jobs (unchanged), `job_analysis`
-91 rows (unchanged), `keyword_corpus` 220 rows (unchanged),
-`job_resume_variants` **3** (down from 10 -- D45: 7 stale rows deleted
-for real, ids 1/3/4/5/6/7/9), `rubric_results` **3** (down from 10, same
-cause, children deleted before parents), `applications` 3 (unchanged --
-D45 touched none of them, by design: rows 2/8/10 were re-rendered in
-place, same ids, same `applications.resume_variant_id` values, `PRAGMA
-foreign_key_check` confirmed clean post-write), `gap_ledger` 19 rows
-(unchanged -- keys on `job_id`, not `job_resume_variant_id`, so
-deleting/re-rendering variants doesn't touch it), 4 `base_resumes` rows
-(unchanged, and now the known-next-stale artifact: same identity-line
-issue D45 just fixed for variants, not yet regenerated, flagged not
-fixed, see D45). All three surviving `job_resume_variants` rows (2, 8,
-10) now render `On F1 OPT STEM | TX` in their real PDF headers,
-confirmed by direct extraction, not the pre-fix sponsorship claim.
-`daily_cap`
+**`data/jobengine.db` real accumulated state, verified fresh this
+checkpoint, not carried forward -- real usage kept moving the db
+between checkpoints again:** 15 companies (unchanged), 4755 jobs (up
+from 4685 -- real `sync` firings, none from this session's own work),
+36 `runs` rows (up from 33), `relevance_scores` 1029 rows/951 distinct
+jobs (unchanged), `job_analysis` 95 rows/82 distinct jobs (up from 91 --
+real reviews between checkpoints), `keyword_corpus` 222 rows (up from
+220), `job_resume_variants`/`rubric_results` **4/4** (down from 8 this
+session: D47 deleted 4 stale pending rows -- ids 11/12/14/15 -- and
+re-rendered the other 4, ids 2/8/10/13, in place against the retagged
+bank), `applications` **4** (up from 3 since last checkpoint from real
+usage -- job 4306 approved for real between checkpoints, `accepted=1`,
+before this session started; D47 itself touched none of the 4
+`applications` rows, by design, same as D45), `gap_ledger` **36 rows**
+(up from 19 -- real reviews between checkpoints; D47's own 4 re-renders
+added none, deliberately, since P4 lives in `ensure_reviewed()` not
+`run_ladder()`, see D47), 4 `base_resumes` rows (unchanged, and now
+doubly stale -- both the identity-line issue D45 fixed for variants and
+the missing-tech-tag issue D47 just fixed for variants, neither applied
+to the base resumes themselves, still flagged not fixed). All 4
+surviving `job_resume_variants` rows (2, 8, 10, 13) now reflect the
+retagged bank's real coverage numbers, confirmed directly, not
+assumed: 0.10/0.50/0.50/0.333 respectively. `daily_cap`
 is still `null`; `min_relevance_score: 20` (D37) remains the only live
 relevance-score gate on `web/app.py`'s `_new_pairs()`; D40's seniority
 exclusion is a second, independent gate upstream of it, in
@@ -601,6 +601,49 @@ B3 filter + the relevance floor): **293 of those (51.1%) are
 
 ## Known issues and deferred work
 
+- **New this checkpoint (D47), needs your input specifically:**
+  `b_bantrly_01` carries a real `SQL` tag (added by the retag) but its
+  `profiles` list is `['ai_ml_engineer', 'software_engineer']`, not
+  `data_scientist` -- so job 3917 (`data_scientist`, needs SQL) can't
+  benefit from this retag no matter how the rest of the bank is tagged,
+  confirmed directly via `select_for_profile()`. Is that bullet's SQL
+  usage genuinely a fit for a data-scientist-framed resume (in which
+  case add `data_scientist` to its `profiles`) or not (in which case
+  this is correct as-is and job 3917's SQL gap needs real new content,
+  same as the other unrelated content gaps D47 found)? Your call.
+- **New this checkpoint (D47), not fixed:** the 4 `base_resumes` rows
+  are now doubly stale -- both D45's identity-line fix and D47's
+  bank-retag fix were applied to `job_resume_variants` only, never to
+  the base resumes themselves. Same reasoning as D45 for why this
+  stays deferred (no FK entanglement, spec 09 expects a new version
+  rather than an overwrite, nothing reads these files at request time).
+- **New this checkpoint (D46), blocking, needs your input specifically:**
+  `rubric.rules.RULE_INFO` has 11 of 13 entries. `R012`/`R013` are
+  missing on purpose -- spec 08's own text for both ("zero speculative
+  bullets"; "slop linter, zero errors, see spec 02") is too terse to
+  build a real explanation from without inventing content, and you
+  asked to be told rather than have this guessed. R013 also has a real
+  open question beyond just "write the text": it wraps spec 02's 17
+  rules, so should its `RULE_INFO` entry be a generic pointer at spec
+  02 (no invented content) or real per-rule text? Your call. Until
+  answered, a rule with no entry still renders correctly (falls back to
+  the bare rule_id), just without the added explanation -- not broken,
+  just incomplete.
+- **New this checkpoint (D46), a live, real, currently-actionable
+  finding, not a config bug:** investigating job 4630 (the real Stripe
+  "Machine Learning Engineer" job behind a reported routing question)
+  found B3 correctly matched it to both `ai_ml_engineer` and
+  `software_engineer` -- the `ai_ml_engineer` pairing was simply never
+  clicked into review, and is confirmed still sitting, live, in `GET
+  /`'s "Not yet reviewed" list right now. Worth reviewing directly; not
+  a code fix.
+- **New this checkpoint (D46), flagged not built:** `queue_list.html`'s
+  "Not yet reviewed" table lists every `(job, profile)` pair as a flat,
+  generically-labeled row with no grouping or visual signal when a job
+  matches more than one profile -- exactly what let the job-4630 case
+  above go unnoticed. A UX-legibility gap, not a routing defect;
+  revisit if this recurs, e.g. group a job's multiple profile rows
+  together or flag "N other profiles also match" inline.
 - **RESOLVED this checkpoint (D45), not still open:** all 10 real
   `job_resume_variants` rows were rendered before a real `identity.toml`
   correction and carried a wrong, visible work-authorization claim on
@@ -1788,6 +1831,82 @@ B3 filter + the relevance floor): **293 of those (51.1%) are
 ## Session log
 
 (Newest first. Date, task id, what changed, what to do next.)
+
+- 2026-08-18, D47 (done): Real data operation against
+  `data/jobengine.db`, planned read-only first (same constraints as
+  D45), executed only after explicit confirmation. `resume/bank/
+  aankit.yaml` was retagged with missing tech-name tags (PyTorch, SQL,
+  others); unlike D45's identity-only fix, this moves real coverage
+  math, so before/after was computed and shown before proposing
+  anything. Real db had grown to 8 `job_resume_variants` since D45 (3
+  to 8, real usage). Before/after showed a genuinely mixed result: 2
+  fixed, 2 improved-not-closed, 4 unchanged for two different reasons
+  -- 3 need real content unrelated to this retag (Go/Terraform/SSO/etc,
+  JavaScript, R), and 2 structural findings worth surfacing rather than
+  assuming: job 3917 (`data_scientist`, SQL) can't see the new SQL tag
+  because the bullet carrying it isn't tagged for that profile (real
+  open question, not decided); job 4630 (`software_engineer`, PyTorch/
+  TensorFlow/XGBoost/Spark) can never improve via re-render since
+  PyTorch is correctly `ai_ml_engineer`-only -- its real fix is
+  reviewing the other profile pairing, per D46.
+  Mechanics identical to D45: 4 approved rows (FK-referenced by real
+  `applications` rows) re-rendered in place via `run_ladder()` called
+  directly; 4 pending rows deleted outright. Checked D45's file-dedup
+  gotcha again, clean this time. Real local model, not a stand-in.
+  `selection_hash` changed for all 4 this time (expected, flagged up
+  front -- P0's reorder depends on keyword scores, which the retag
+  changed). Verified after commit: counts correct, all 4 `applications`
+  FKs resolve, `PRAGMA foreign_key_check` clean. Full db backup taken
+  first, same as D45.
+  **Found by the full-suite re-run, not assumed clean:** 2 tests broke
+  -- both hard-coded `["Go", "Kubernetes"]` as a real, fully-uncovered
+  example, and the retag gave Kubernetes genuine coverage. A correct
+  consequence of the bank improving, not a bug. Fixed by swapping to
+  `["Go", "Rust"]` (D43's own #1/#2 real gaps, re-confirmed uncovered
+  before use), synced across both `test_queue_orchestrate.py` and its
+  sibling copy in `test_web_app.py`. Full suite re-confirmed: 504/504,
+  ruff clean.
+  Full writeup: D47, docs/decisions.md.
+  Next: your call on whether `b_bantrly_01` should also be tagged
+  `data_scientist`. `base_resumes` now doubly stale (D45 + D47),
+  still deferred. Same other open items as last checkpoint otherwise.
+
+- 2026-08-18, D46 (done): Two independent pieces. **Routing
+  investigation:** the reported job id (3904) turned out to be a
+  different real job entirely; found the actually-described one
+  (Stripe "Machine Learning Engineer," PyTorch/TensorFlow/XGBoost/Spark)
+  as job 4630. Live-verified `matches_profiles()` returns both
+  `ai_ml_engineer` and `software_engineer` for it, corroborated by
+  `job_analysis` already having real rows for both (since `analyze_job()`
+  fans one extraction call out to every matched profile at once). No
+  routing bug, no config change. The real story: only the
+  `software_engineer` pairing was ever reviewed; the `ai_ml_engineer`
+  one -- confirmed still live and unfiltered right now -- was simply
+  never clicked. Flagged an adjacent, real UX gap (the queue list gives
+  no visual signal when a job matches multiple profiles) without fixing
+  it, out of the asked scope.
+  **Rubric rule explanations:** `queue_detail.html` showed bare
+  `rule_id`/`detail` pairs; added `rubric.rules.RuleInfo`/`RULE_INFO`
+  (11 of 13 rules, text quoted verbatim from spec 08's own table, not
+  paraphrased), wired into `queue_detail()`'s context and the template,
+  falls back to the bare rule_id for anything missing. Considered and
+  rejected live-parsing spec 08's markdown as the "source" -- a static
+  13-row table doesn't earn that complexity over a hand-transcribed,
+  comment-linked constant. R012/R013 deliberately left out: spec 08's
+  own text for both is too terse to build a real explanation from
+  without inventing content, flagged for the user's text per their
+  explicit instruction, including a real open question on whether R013
+  (which wraps spec 02's 17 rules) should get a generic pointer or real
+  per-rule text.
+  5 new tests, tests-first. Full suite 504/504 (up from 499), ruff
+  clean. Verified against a real scratch copy on job 4630 itself --
+  full circle, its real pre-existing R001 failure now renders "Keyword
+  coverage" with the spec-08 explanation. Full writeup: D46,
+  docs/decisions.md.
+  Next: blocked on the user for R012/R013 text (and the R013
+  generic-vs-real-text call). Also available: the live `(4630,
+  ai_ml_engineer)` review, the queue-list multi-profile visibility gap,
+  and everything already queued from D41-D45.
 
 - 2026-08-18, D45 (done): Real data operation against
   `data/jobengine.db`, planned read-only first, executed only after

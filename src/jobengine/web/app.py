@@ -42,7 +42,7 @@ from jobengine.profiles.config import load_profile_config
 from jobengine.queue import orchestrate
 from jobengine.resume.bank import load_bank
 from jobengine.resume.render import load_identity
-from jobengine.rubric.rules import has_unrecoverable_rubric_failure
+from jobengine.rubric.rules import RULE_INFO, has_unrecoverable_rubric_failure
 
 _TEMPLATES_DIR = Path(__file__).parent / "templates"
 templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
@@ -183,6 +183,7 @@ def queue_detail(
             "docx_url": _resume_static_url(variant.docx_path),
             "hard_block": hard_block,
             "needs_override": needs_override,
+            "rule_info": RULE_INFO,
         },
     )
 

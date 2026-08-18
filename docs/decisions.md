@@ -2497,3 +2497,217 @@ stale, but have no `applications`/FK entanglement and spec 09's own
 versioning already expects a new version rather than an overwrite
 (`persist_base_resume()`, E2). Flagged, not touched -- revisit
 separately if/when regenerating them is wanted.
+
+---
+
+**D46. Two independent pieces this session: a real routing
+investigation that found no bug, and a human-readable rubric-rule
+explanation feature on the review page, sourced from
+`specs/08-rubric.md`'s own text.**
+
+**The routing investigation, read-only, before any config was
+proposed.** The job id given (3904) turned out to be a different, real
+job entirely (Notion, "Software Engineer, Collections Infra") --
+searching for the actual described job (Stripe, "Machine Learning
+Engineer", required PyTorch/TensorFlow/XGBoost/Spark) found it as job
+4630. **B3's title routing is not the bug.** Live-verified, not
+inferred: `matches_profiles()` on job 4630's real title returns
+`['ai_ml_engineer', 'software_engineer']`, both, confirmed directly
+against the shipped function. Corroborating evidence already sitting in
+the db: `pipeline/extract.py`'s `analyze_job()` fans a single extraction
+call out to *every* matched profile in one pass (`profiles =
+matches_profiles(job, filter_config)`, then one `job_analysis` row per
+profile in `profiles`) -- `job_analysis` already had real rows for both
+`ai_ml_engineer` and `software_engineer` on job 4630 with identical
+extracted keywords, which could only happen if B3 had matched both.
+
+**What actually happened: only the `software_engineer` pairing was ever
+clicked into review** (`job_resume_variants` id 14, coverage 0.00). The
+`ai_ml_engineer` pairing -- the one that could draw on real PyTorch
+work in the bank -- was never triggered, and re-verified live at
+investigation time to still be sitting, right now, in `GET /`'s "Not
+yet reviewed" section: `passes_all_filters()` true,
+`passes_relevance_floor()` true for both profiles (job 4630 has zero
+`relevance_scores` rows at all -- C4 never ran on it, and the floor
+fails open on an unscored pair, D37), and `(4630, 'ai_ml_engineer')`
+confirmed absent from `list_existing_variant_pairs()`. **No config
+change proposed or made** -- there was nothing wrong with
+`config/filters.yaml` to fix.
+
+**A real, adjacent gap surfaced but explicitly left out of scope:**
+`queue_list.html`'s "Not yet reviewed" table lists every `(job,
+profile)` pair as a flat, generically-labeled row with no grouping or
+visual signal that a given job has more than one candidate profile
+route -- easy to act on one and never notice the other sitting a row or
+two away in a list of hundreds. A UX-legibility issue, not a routing
+defect; flagged for a future session, not built here since it wasn't
+what was asked.
+
+**The rubric-rule-explanation feature.** `queue_detail.html`'s "Hard
+failures" list rendered bare `rule_id`/`detail` pairs (`R001: coverage
+0.00 < 0.70`), meaningful in `specs/08-rubric.md`'s table, opaque on
+the page. Added `RuleInfo`/`RULE_INFO` (`rubric/rules.py`, the module
+that already owns rule semantics -- `check_r001`-`check_r013`, D42's
+`has_unrecoverable_rubric_failure()`), one dict, text quoted directly
+from spec 08's own table (and, for R010, the detail paragraph directly
+below it), not paraphrased into something new. Considered parsing
+`specs/08-rubric.md` live so the "one source" would be the file itself;
+rejected -- nothing else in this codebase treats a spec file as runtime
+data, and a 13-row, rarely-changing table doesn't earn a markdown
+parser over a hand-transcribed constant with a comment pointing back at
+spec 08 as the thing to keep it in sync with (same shape as
+`_LIST_WINDOW_DAYS` importing `pipeline/batch.py`'s `WINDOW_DAYS`
+rather than a second copy, D38). `queue_detail()`
+(`web/app.py`) passes `RULE_INFO` into the template context (a plain
+module import, no per-request computation); the template shows the
+friendly name and one-line explanation alongside the existing terse
+`detail` text, which stays -- "coverage 0.00 < 0.70" is real measured
+signal, not replaced, just framed. Falls back to the bare `rule_id` for
+any rule with no entry, rather than rendering blank or erroring.
+
+**R012 and R013 are deliberately not in `RULE_INFO` yet.** Spec 08's
+own text for both is too terse to build a real explanation from without
+inventing content spec 08 doesn't provide: R012 ("zero speculative
+bullets") is never explained anywhere in spec 08 (that context lives in
+spec 01/03's bank-status/watermarking material); R013 ("slop linter
+passes with zero errors") just points at spec 02's 17 separate rules
+without summarizing any of them. Per explicit instruction, flagged
+rather than guessed or silently pulled from a second document (spec
+02) the user didn't name as a source. Real tension recorded for R013
+specifically: it wraps spec 02's rules, so the *complete* answer for
+"why did R013 fail" ultimately lives outside spec 08 either way --
+whether R013's own `RULE_INFO` entry should be a generic pointer at
+spec 02 (no invented content) or real per-rule text is the user's call,
+not decided here. `RULE_INFO` currently has 11 of 13 entries; the
+template's fallback means R012/R013 failures still render correctly
+today, just without the added explanation, not broken.
+
+Tests first (hard rule 7): `test_rubric.py` gained 4 (exact 11-key set,
+every entry non-empty, spot-checks on R001's "0.70" and R010's
+"Arial"); `test_web_app.py` gained 1, reusing the file's existing
+`_EXTRACT_PAYLOAD` fixture (already a real R001-only failure) to assert
+"Keyword coverage" renders alongside "R001". Full suite 504/504 (up
+from 499), `ruff check`/`format --check` clean. Manually verified
+against a real, production-shaped scratch copy (never the real db) on
+the exact job this session's own routing investigation centered on:
+job 4630's real, pre-existing R001 failure now renders "Keyword
+coverage (R001): coverage 0.00 < 0.70" with the spec-08-sourced
+explanation beneath it.
+
+---
+
+**D47. All 8 `job_resume_variants` rows re-checked against a real bank
+retag (missing technology tags added -- PyTorch, SQL, others), 4
+deleted for real, 4 re-rendered in place, after a read-only-first plan
+and explicit confirmation per hard rule 13. Same shape as D45, but this
+retag moves real rubric math (`coverage()` reads `bullet.keywords`
+directly), so the before/after was computed and shown before anything
+ran, not assumed identical the way D45's identity-only fix was.**
+
+**Real before/after, computed read-only against the retagged bank
+before any write, answered the actual question asked ("did the retag
+fix the 0.00s or is something else also wrong") with a real, mixed
+result, not a clean yes.** Of 8 real variants: 2 genuinely fixed off a
+stale value (job 4109's software_engineer variant 0.25->0.50; job
+2009's ai_ml_engineer variant, deleted this session, 0.0->0.50
+pre-patch), 2 more improved but not closed, and **4 unchanged, for two
+different real reasons:**
+
+1. **Real, unrelated content gaps (variants for jobs 3950, 3904,
+   3917).** Go/Terraform/SSO/SCIM/OAuth/OIDC/RBAC, JavaScript, and R
+   were never in scope for an "add missing ML tool tags" retag -- the
+   bank has no real work history in them. Tagging them without real
+   content would be exactly the fabrication hard rule 2 exists to
+   prevent; these need real new bank content (or stay logged in
+   `gap_ledger`, already happening per D43) to ever close, not a tag.
+2. **Two real, structural findings surfaced by the numbers themselves,
+   not assumed -- both checked directly against the actual retagged
+   bank before proposing anything:**
+   - Job 3917 (`data_scientist`, needs SQL) stayed at 0.333 even though
+     `SQL` is now tagged on `b_bantrly_01` -- because that bullet's
+     `profiles` list is `['ai_ml_engineer', 'software_engineer']`, not
+     `data_scientist`. `select_for_profile()` filters by profile
+     membership before coverage is ever computed, so no amount of
+     retagging elsewhere fixes this; only adding `data_scientist` to
+     that bullet's own `profiles` list would, and whether that's
+     correct (does that bullet's SQL usage genuinely belong on a
+     data-scientist-framed resume?) is a real content judgment call,
+     surfaced for a future session rather than decided here.
+   - Job 4630 (`software_engineer`, needs PyTorch/TensorFlow/XGBoost/
+     Spark) stayed at 0.000, and re-rendering it could not have changed
+     that: `PyTorch` is correctly `ai_ml_engineer`-only in the bank
+     (`b_utd_03`), not a retag gap. This is the same job D46's routing
+     investigation already found: it genuinely matches both profiles,
+     only `software_engineer` was ever reviewed, and ML-framework
+     content structurally cannot appear on a `software_engineer`-tagged
+     candidate by design. The real fix is reviewing `(4630,
+     ai_ml_engineer)`, still sitting live in the queue -- not a data
+     migration. Included in this session's delete set anyway (it was
+     just as stale as the others), flagged so the unchanged 0.000 isn't
+     mistaken for the retag or the re-render not working.
+
+**Mechanics identical to D45, different, larger row set** (the real db
+grew from 3 to 8 `job_resume_variants` rows between sessions from real
+usage): 4 approved rows (ids 2, 8, 10, 13; jobs 3950/4109/4041/4306),
+referenced by 4 real `applications` rows, re-rendered in place via
+`patch.run_ladder()` called directly (same mechanism as D45, bypasses
+`ensure_reviewed()`'s dedup lookup) and `UPDATE`d by id, `applications`
+untouched; 4 pending rows (ids 11, 12, 14, 15; jobs 3904/3917/4630/2009)
+deleted outright (`rubric_results` children first), nothing referenced
+them. Checked the file-dedup gotcha D45 hit again before doing
+anything -- this time clean, no approved row shared a physical file
+with a row being deleted (variant 13 shared with variant 2, both
+survived; variant 14 shared with variant 11, both deleted together),
+so no special handling was needed, just confirmed rather than assumed.
+
+**Run for real, with the real local model:** all 4 re-renders genuinely
+re-attempted P3. Real result, matching the pre-patch prediction shown
+in the plan exactly (coverage 0.10/0.50/0.50/0.333 for the four,
+respectively) -- P3 closed nothing further this time, unlike the
+prediction's own caveat that it might. **Unlike D45, `selection_hash`
+changed for all 4** (expected and stated in the plan up front: P0's
+reorder sorts bullets by keyword score, which the retag changed, so
+even an unchanged bullet *set* can produce a different *order* and
+therefore a different hash -- D45's hash staying identical was
+specific to an identity-only change with zero keyword impact, not a
+general property of re-renders). Verified after commit: `job_resume_
+variants`/`rubric_results` count 4, `applications` still 4 and all FKs
+resolve, `PRAGMA foreign_key_check` clean. Full backup of the real db
+taken to scratchpad before any write, same as D45.
+
+**Noted, not acted on:** `gap_ledger` gained no new rows from this
+session's 4 re-renders, because P4 lives in `ensure_reviewed()` (D43),
+not `run_ladder()`, and this operation deliberately calls `run_ladder()`
+directly. The four jobs' original still-missing keywords (including
+ones now resolved by the retag, e.g. job 4109's `SQL`) are already in
+`gap_ledger` from when each was first reviewed, pre-retag --
+`gap_ledger` has no "resolved" concept and isn't meant to (D43: an
+append-only historical log, not a live worklist), so those rows stay
+as an accurate record of what was missing at the time, not a bug or a
+gap this session needs to close.
+
+**A real regression the full-suite re-run caught, not assumed clean:**
+2 of 504 tests failed after the retag --
+`test_ensure_reviewed_logs_uncovered_keywords_to_gap_ledger` and
+`test_ensure_reviewed_second_call_does_not_log_gap_ledger_again`
+(`test_queue_orchestrate.py`). Root cause: both hard-code `_EXTRACT_
+PAYLOAD = {"required_keywords": ["Go", "Kubernetes"], ...}` as a
+controlled example of a fully-uncovered real gap against the *real*
+bank (`load_bank()`, not a synthetic fixture) -- and the retag added a
+genuine `Kubernetes` tag to `b_bantrly_01`, so the fixture went from
+fully-uncovered to half-covered, breaking both tests' exact-2-keyword
+assertions. Not a bug in D47's data operation or in the retag itself --
+a real, correct side effect of the bank getting more accurate, caught
+exactly the way the test suite is supposed to catch it. Fixed by
+swapping the fixture to `["Go", "Rust"]`, re-confirmed still fully
+uncovered against the retagged bank via `measure.missing_keywords()`
+before using it, not reused blindly -- these are also D43's own #1 and
+#2 real gap-frequency keywords (16 and 12 distinct jobs), if anything a
+more representative real-world example than the original choice. Same
+fixture is shared verbatim in `test_web_app.py` (no test there actually
+failed, since none assert an exact keyword count, but the same stale
+`["Go", "Kubernetes"]` value and a comment describing it as fully
+uncovered were both there too) -- updated for consistency and
+accuracy, not left silently out of sync with its sibling file. Full
+suite re-confirmed green after the fix: 504/504, `ruff check`/`format
+--check` clean on both touched test files.

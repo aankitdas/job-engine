@@ -12,6 +12,7 @@
     dl { display: grid; grid-template-columns: 12rem 1fr; row-gap: 0.3rem; }
     dt { font-weight: bold; }
     ul.deficits { color: #a00; }
+    p.rule-explanation { color: #555; font-size: 0.9rem; margin: 0.2rem 0 0.6rem; }
     form.actions { margin-top: 1.5rem; }
     form.actions button { font-size: 1rem; padding: 0.5rem 1.5rem; margin-right: 1rem; }
     button.reject { background: #a00; color: white; border: none; }
@@ -45,7 +46,14 @@
   <h3>Hard failures</h3>
   <ul class="deficits">
     {% for r in rubric_results %}
-    <li><strong>{{ r.rule_id }}</strong>: {{ r.detail }}</li>
+    {% set info = rule_info.get(r.rule_id) %}
+    <li>
+      <strong>{{ info.name if info else r.rule_id }}</strong>
+      ({{ r.rule_id }}): {{ r.detail }}
+      {% if info %}
+      <p class="rule-explanation">{{ info.description }}</p>
+      {% endif %}
+    </li>
     {% endfor %}
   </ul>
   {% endif %}

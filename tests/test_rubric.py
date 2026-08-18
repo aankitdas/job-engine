@@ -637,3 +637,41 @@ def test_r006_alone_is_unrecoverable():
 
 def test_multiple_non_r001_rules_are_unrecoverable():
     assert rules.has_unrecoverable_rubric_failure(["R010", "R013"]) is True
+
+
+# --- RULE_INFO: human-readable name/description per rule, sourced from
+# specs/08-rubric.md (D46), the one place the review page's rule
+# explanations come from so the UI and the spec can't drift apart.
+# R012/R013 are deliberately not yet in RULE_INFO -- spec 08's own text
+# for both is too terse to render usefully (D46), pending real text from
+# the user rather than an invented paraphrase.
+
+
+def test_rule_info_has_eleven_confirmed_entries():
+    assert set(rules.RULE_INFO.keys()) == {
+        "R001",
+        "R002",
+        "R003",
+        "R004",
+        "R005",
+        "R006",
+        "R007",
+        "R008",
+        "R009",
+        "R010",
+        "R011",
+    }
+
+
+def test_every_rule_info_entry_has_a_nonempty_name_and_description():
+    for rule_id, info in rules.RULE_INFO.items():
+        assert info.name.strip(), rule_id
+        assert info.description.strip(), rule_id
+
+
+def test_r001_description_states_the_070_threshold():
+    assert "0.70" in rules.RULE_INFO["R001"].description
+
+
+def test_r010_description_names_arial():
+    assert "Arial" in rules.RULE_INFO["R010"].description

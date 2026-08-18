@@ -174,9 +174,9 @@ class _FakeClient:
 
 
 _EXTRACT_PAYLOAD = {
-    "required_keywords": ["Go", "Kubernetes"],
+    "required_keywords": ["Go", "Rust"],
     "preferred_keywords": [],
-    "tech_stack": ["Go", "Kubernetes"],
+    "tech_stack": ["Go", "Rust"],
 }
 
 
@@ -236,6 +236,24 @@ def test_detail_page_first_visit_triggers_ensure_reviewed_and_persists(
     assert response.status_code == 200
     assert get_job_resume_variant(conn, job_id, "software_engineer") is not None
     assert "R001" in response.text
+
+
+def test_detail_page_shows_human_readable_rule_name_alongside_rule_id(
+    conn, client_factory
+):
+    """D46: the raw rule_id/detail pair stays (real measured signal),
+    but a reviewer also sees a plain-English name and explanation,
+    sourced from specs/08-rubric.md's own text (rubric.rules.RULE_INFO),
+    not invented in the template."""
+    job_id = _seed_job(conn)
+    _seed_base_resume(conn)
+    client = client_factory(_FakeClient(_EXTRACT_PAYLOAD))
+
+    response = client.get(f"/jobs/{job_id}/software_engineer")
+
+    assert "R001" in response.text
+    assert "Keyword coverage" in response.text
+    assert "0.70" in response.text
 
 
 def test_detail_page_links_the_rendered_docx_for_download(conn, client_factory):
@@ -389,9 +407,11 @@ def test_list_page_shows_untriggered_job_with_no_relevance_score_yet(
     assert "Backend Engineer" in response.text
 
 
-# D42: _EXTRACT_PAYLOAD's ["Go", "Kubernetes"] has no coverage in the
-# real bank (the same test_detail_page test below already asserts "R001"
-# appears on this exact fixture's rendered page), so every variant seeded
+# D42: _EXTRACT_PAYLOAD's ["Go", "Rust"] (["Go", "Kubernetes"] until
+# D47's real bank retag gave "Kubernetes" genuine coverage) has no
+# coverage in the real bank (the same test_detail_page test below
+# already asserts "R001" appears on this exact fixture's rendered page),
+# so every variant seeded
 # with it is a real, soft (R001-only) rubric failure -- approve() now
 # gates on that, and this used to be the bug D42 fixes: a bare POST
 # approve on this variant used to succeed silently.

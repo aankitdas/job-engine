@@ -36,6 +36,75 @@ class RubricResult(BaseModel):
     measurements: dict[str, float | int]
 
 
+class RuleInfo(BaseModel):
+    name: str
+    description: str
+
+
+# Human-readable name/description per rule, for the review page (D46 in
+# docs/decisions.md). Sourced verbatim from specs/08-rubric.md's own
+# hard-rules table (and, for R010, the paragraph directly below it) --
+# this is the one place that text lives in code; keep it in sync with
+# spec 08 by hand rather than let a second copy drift. R012/R013 are
+# deliberately absent: spec 08's own text for both ("zero speculative
+# bullets", "slop linter passes with zero errors, see spec 02") is too
+# terse to explain usefully to a reviewer without inventing content spec
+# 08 doesn't provide -- pending real text from the user (D46), not
+# guessed. Callers must handle a missing key.
+RULE_INFO: dict[str, RuleInfo] = {
+    "R001": RuleInfo(
+        name="Keyword coverage",
+        description="Required-keyword coverage must be at least 0.70, "
+        "measured by set intersection, case and stem normalized.",
+    ),
+    "R002": RuleInfo(
+        name="Front-loading",
+        description=">= 0.75 of the profile's top 10 corpus keywords must "
+        "appear in the top half of page 1.",
+    ),
+    "R003": RuleInfo(
+        name="Bullet count",
+        description="Every role must have 3 to 8 bullets, including the summary.",
+    ),
+    "R004": RuleInfo(
+        name="Summary bullet",
+        description="Every role must have exactly one summary bullet.",
+    ),
+    "R005": RuleInfo(
+        name="One period per bullet",
+        description="Every bullet must contain at most one period.",
+    ),
+    "R006": RuleInfo(
+        name="Line length",
+        description="Every bullet must render in 3 lines or fewer.",
+    ),
+    "R007": RuleInfo(
+        name="Past tense",
+        description="Every bullet must be past tense.",
+    ),
+    "R008": RuleInfo(
+        name="No first-person pronouns",
+        description="No first-person pronouns are allowed.",
+    ),
+    "R009": RuleInfo(
+        name="Reverse chronological order",
+        description="Roles must be in reverse chronological order.",
+    ),
+    "R010": RuleInfo(
+        name="Typography",
+        description="Typography must match the golden spec: Arial "
+        "everywhere, sizes 14 / 12 / 10.5, spacing 1.15 in the header "
+        "block and 1.5 in the body, margins 0.5in all sides, exactly one "
+        "right tab stop at 7.5in, left alignment not justified.",
+    ),
+    "R011": RuleInfo(
+        name="Single column",
+        description="The document must be single column: no tables or "
+        "text boxes in the body.",
+    ),
+}
+
+
 def check_r001(bank: Bank, required_keywords: list[str]) -> Deficit | None:
     cov = measure.coverage(bank, required_keywords)
     if cov >= 0.70:
