@@ -3,85 +3,60 @@
 **Claude Code: read this file at the start of every session and update it at
 the end via `/checkpoint`. Do not rely on memory of previous sessions.**
 
-Last updated: 2026-08-18
-Current task: **D47: 8 real `job_resume_variants` rows re-checked
-against a real bank retag (missing tech-name tags added -- PyTorch,
-SQL, others), 4 deleted, 4 re-rendered in place, after a read-only-
-first plan, real before/after numbers shown up front, and your explicit
-confirmation per hard rule 13. Unlike D45, this retag moves real rubric
-math, and the before/after showed a genuinely mixed result, not a
-clean fix.**
+Last updated: 2026-08-20
+Current task: **D48: `GET /` gains a third section, "Approved," closing
+the dead end where an approved job had no list view of its own -- the
+only way to see what you'd applied to was a direct SQL query against
+`data/jobengine.db`.**
 
-**Real before/after, computed read-only before anything ran:** of 8
-variants, 2 genuinely fixed off a stale value, 2 more improved but not
-closed, and 4 unchanged for two different real reasons. **Reason 1:**
-3 unchanged variants need keywords (Go/Terraform/SSO/SCIM/OAuth/OIDC/
-RBAC, JavaScript, R) that were never in scope for an "add missing ML
-tool tags" retag -- real content gaps, not a retag miss; fabricating
-tags without real content would violate hard rule 2. **Reason 2, two
-structural findings surfaced by the numbers and checked directly, not
-assumed:** (a) job 3917 (`data_scientist`, needs SQL) stayed unchanged
-because the bullet that now carries `SQL` (`b_bantrly_01`) isn't
-tagged `data_scientist` in its `profiles` list -- retagging elsewhere
-in the bank can't fix a bullet a `data_scientist` job structurally
-never sees; whether that bullet's SQL usage genuinely belongs on a
-data-scientist-framed resume is a real content call, surfaced for you,
-not decided here. (b) job 4630 (`software_engineer`, needs PyTorch/
-TensorFlow/XGBoost/Spark) stayed at 0.000 and re-rendering it could not
-have changed that -- `PyTorch` is correctly `ai_ml_engineer`-only in
-the bank, not a retag gap; this is the same job from last checkpoint's
-routing investigation, and its real fix is reviewing `(4630,
-ai_ml_engineer)`, still sitting live in the queue, not a data
-migration.
+**Three decisions made explicit before writing any code, all confirmed
+by you:** (1) sourced from `applications` (joined to `jobs` and
+`job_resume_variants`), not `job_resume_variants.review_status =
+'approved'` -- `applications` is the table `pipeline/filter.py`'s
+`is_already_applied()` already treats as authoritative for "applied,"
+and it carries submission-specific fields (`status`, later
+`submitted_at`/`autonomy_level`) `job_resume_variants` doesn't; (2) not
+scoped by `_LIST_WINDOW_DAYS` (the 7-day lookback the other two
+sections use) -- an approved-but-unsubmitted job must never silently
+age out, that's the exact bug this section exists to fix, so
+`list_applications()` takes no date argument at all; (3)
+`applications.status` rendered as plain text, no badge/filter -- every
+row is `'queued'` today, nothing writes any other value yet, a filter
+over a single-valued column would be speculative UI for outcome
+tracking that doesn't exist. Full reasoning: D48, docs/decisions.md.
 
-**Mechanics identical to D45, different (larger) row set** -- the real
-db grew to 8 `job_resume_variants` between checkpoints from real usage.
-4 approved rows (ids 2, 8, 10, 13; jobs 3950/4109/4041/4306), referenced
-by 4 real `applications` rows, re-rendered in place via `patch.
-run_ladder()` called directly (same mechanism as D45) and `UPDATE`d by
-id, `applications` untouched; 4 pending rows (ids 11, 12, 14, 15; jobs
-3904/3917/4630/2009) deleted outright, nothing referenced them. Checked
-D45's file-dedup gotcha again before doing anything -- clean this time,
-no approved row shared a physical file with a row being deleted.
-
-**Run for real, with the real local model:** all 4 re-renders matched
-the pre-patch prediction shown in the plan exactly (coverage
-0.10/0.50/0.50/0.333). **Unlike D45, `selection_hash` changed for all
-4** -- expected and flagged in the plan up front: P0's reorder sorts by
-keyword score, which the retag changed, so even an unchanged bullet
-*set* can produce a different *order* and hash. Verified after commit:
-counts correct, `applications` still 4 with all FKs resolving, `PRAGMA
-foreign_key_check` clean. Full db backup to scratchpad before any
-write, same as D45.
-
-**A real regression the full-suite re-run caught, not assumed clean:**
-2 tests failed after the retag -- both hard-coded `["Go", "Kubernetes"]`
-as a controlled fully-uncovered-keyword example against the *real*
-bank, and the retag gave `Kubernetes` genuine coverage
-(`b_bantrly_01`), breaking their exact-2-keyword assertions. Not a bug
-in this session's data operation or in the retag -- a correct
-consequence of the bank getting more accurate, caught exactly the way
-the suite is supposed to catch it. Fixed by swapping to `["Go",
-"Rust"]` (D43's own #1/#2 real gap-frequency keywords, re-confirmed
-still fully uncovered before use, not reused blindly), updated in both
-`test_queue_orchestrate.py` and its sibling copy in `test_web_app.py`
-for consistency. Full suite re-confirmed green: 504/504, ruff clean.
-
-See D47 in docs/decisions.md for the complete writeup.
+**Built:** `db/models.py` gains `ApplicationEntry` +
+`list_applications()` (the join above, `ORDER BY a.id DESC`, no
+`WHERE`); `web/app.py`'s `queue_list()` calls it and precomputes each
+row's `.docx` URL via the existing `_resume_static_url()`;
+`queue_list.html` gains the "Approved" table -- title, company,
+profile, apply link, `.docx` download link (added after your review of
+the first draft: the section's purpose is "approved, still need to
+submit," and the résumé file is half of what that takes, not just the
+apply URL), status text, and a link back to the existing detail page.
+7 new tests, tests-first per hard rule 7 (`test_db.py` +3,
+`test_web_app.py` +4). Full suite 511 collected, 506 passed; the other
+5 (`test_batch.py`, a stale relative-date fixture unrelated to this
+work) fail identically on `main` before this session's changes,
+confirmed via `git stash`, not caused by D48. `ruff check`/`format`
+clean on every file this session touched.
 
 Next: no next task chosen yet, needs your go-ahead. Same open items as
-last checkpoint (R012/R013 text still needed for `RULE_INFO`, reviewing
-the live `(4630, ai_ml_engineer)` pairing, the queue-list multi-profile
+before (R012/R013 text still needed for `RULE_INFO`, reviewing the
+live `(4630, ai_ml_engineer)` pairing, the queue-list multi-profile
 gap, G2, the Ashby-ceiling gap, `autonomy_level` wiring, the
-approve()-called-twice guard, `base_resumes` regeneration [now doubly
-stale -- identity text and bank tags both], a real staleness-hash
-mechanism, a gap_ledger query surface, B3-followup/F2/F3), plus new
-from this session: **the `data_scientist`/`b_bantrly_01`/SQL profile-
-tagging call above.** D40-D43 committed (`8cccb16`, `6ef7eb1`,
-`72974fe`); D44+D45 committed together (`36faa77`); **D46 and D47 (docs
-+ code, where applicable) are not yet committed, and
-`resume/bank/aankit.yaml`'s own retag is still uncommitted too** --
-confirm before committing/pushing.
+approve()-called-twice guard [note: if that guard is ever missing and
+`approve()` fires twice for one variant, D48's new section would
+render both `applications` rows for the same job -- a real, if
+currently unreachable, consequence worth remembering if that bug is
+ever hit for real], `base_resumes` regeneration [doubly stale --
+identity text and bank tags both], a real staleness-hash mechanism, a
+gap_ledger query surface, B3-followup/F2/F3, and the
+`data_scientist`/`b_bantrly_01`/SQL profile-tagging call from D47).
+D40-D47 all committed (`8cccb16`, `6ef7eb1`, `72974fe`, `36faa77`,
+`6e59e4e`); **this session's D48 changes (5 files: `db/models.py`,
+`web/app.py`, `queue_list.html`, `test_db.py`, `test_web_app.py`) are
+uncommitted** -- you're handling git yourself this session.
 
 Separately: **B2's Task Scheduler regression is now confirmed fixed, not
 just a positive sign.** Last checkpoint had one real unattended firing
@@ -131,7 +106,7 @@ project's own B1/B2 sessions) treated that file.
 | D4 | Patch P3 | done | `patch.py` gains rephrase+writeback; real deficit closed live (CMB, coverage 0.0->1.0), real bug found+fixed via that run; persist/reload/reuse chain re-verified live with full captured evidence 2026-08-05, see D30 + its second addendum |
 | E1 | Profile config + brief | done | `jobengine.profiles` package: registry (`config/profiles.yaml`) + `profiles brief` CLI; live-verified against real db/bank for all 3 profiles; see D31 |
 | E2 | Base resumes | done | all 3 profiles persisted (`resume/base/{ai_ml_engineer,software_engineer,data_scientist}/v1/`, `ai_ml_engineer` also has v2; `base_resumes` ids 1-4), each `passed: true, hard_failures: []`, `coverage: 1.0`; R002 demoted to scored-only (D33), coverage measured against bank-frequency fallback not real corpus (D34, revisit later) |
-| F1 | Review queue | done | `queue/orchestrate.py` + `web/app.py`, patch-ladder rendering stays lazy per-job trigger (unchanged); C4/C3 (relevance/extraction) now have a real daily batch orchestrator (`pipeline/batch.py`, D38), closing D35's deliberately-deferred gap now that C4 exists; `.docx` download link added to `queue_detail.html`; verified end to end against the real app/db with real job 3871 and, this session, a real 13m28s live catch-up run (D38); see D35, D37, D38 |
+| F1 | Review queue | done | `queue/orchestrate.py` + `web/app.py`, patch-ladder rendering stays lazy per-job trigger (unchanged); C4/C3 (relevance/extraction) now have a real daily batch orchestrator (`pipeline/batch.py`, D38), closing D35's deliberately-deferred gap now that C4 exists; `.docx` download link added to `queue_detail.html`; verified end to end against the real app/db with real job 3871 and, this session, a real 13m28s live catch-up run (D38); `GET /` gained a third "Approved" section sourced from `applications` (D48); see D35, D37, D38, D48 |
 | F2 | Dashboard | not started | |
 | F3 | Telegram | not started | |
 | G1 | Autonomy gating | done | `apply/form_schema.py` + `config/apply.yaml`, Greenhouse-only (Ashby has no public form-schema endpoint, real 401 confirmed, D39); fetch+classify only, no filling/submitting (G2+); `classify_autonomy_ceiling()`'s rule inverted after a real 40-job live run found the first pass too permissive, see D39 |
@@ -175,7 +150,10 @@ accepted)` so `reject()`'s existing calls are unaffected),
 `get_rubric_results()`, `get_job_by_id()`, `latest_base_resume()` (full
 row, not just the version int), `insert_application()`,
 `list_pending_review_queue()`, `list_existing_variant_pairs()`; new this
-checkpoint, D43: `GapLedgerRow` model + `insert_gap_ledger_entries()`
+checkpoint, D48: `ApplicationEntry` model + `list_applications()`
+(`applications` joined to `jobs`/`job_resume_variants`, `ORDER BY a.id
+DESC`, deliberately no date filter -- backs `GET /`'s new "Approved"
+section, see D48); new this checkpoint, D43: `GapLedgerRow` model + `insert_gap_ledger_entries()`
 (executemany, mirrors `insert_rubric_results()`'s pattern, no dedup by
 design -- see D43); new this session, C4: `RelevanceScore`/
 `RankableScore` models +
@@ -183,7 +161,9 @@ design -- see D43); new this session, C4: `RelevanceScore`/
 `list_relevance_scores_for_cutoff()` (joins `jobs` for the
 `first_seen_at` tiebreak), `update_relevance_selection()`),
 `__main__.py` (`uv run python -m jobengine.db {init,migrate,stats}`).
-Tests: `test_db.py` 42 (up from 41, +1 net this checkpoint for
+Tests: `test_db.py` 45 (up from 42, +3 this checkpoint for
+`list_applications()` -- empty case, joined-row round trip, and the
+no-date-window case, D48); (prior checkpoint's own delta: +1 net for
 `insert_gap_ledger_entries()`/`GapLedgerRow` -- D43 added 1 new test
 here, the round-trip case; the idempotency/no-missing-keywords cases
 live in `test_queue_orchestrate.py` instead since they need
@@ -444,7 +424,10 @@ from one fake.
 session (C4 follow-up, D37)): `app.py` —
 FastAPI app, `get_ctx()` (lazy singleton `QueueContext`, overridden in
 tests via `app.dependency_overrides`), `GET /` (pending queue +
-newly-B3-matched-but-never-triggered pairs from the last 7 days), `GET
+newly-B3-matched-but-never-triggered pairs from the last 7 days +, new
+this checkpoint (D48), every `applications` row via `db/models.py`'s
+`list_applications()`, deliberately unscoped by the 7-day window --
+see Current task above), `GET
 /jobs/{job_id}/{profile}` (the lazy trigger; renders score/coverage/
 front_load/hard-failures/the real rendered PDF via a `/resume` static
 mount; new this checkpoint, D42: also computes `hard_block`/
@@ -465,7 +448,12 @@ ones is what surfaced the disqualifiers-leak bug (D37).
 `templates/queue_list.html`/`queue_detail.html` (plain server-rendered
 HTML, no JS, per spec: reviewing means seeing the already-patched
 candidate and deciding, not editing bullet text in a browser;
-`queue_detail.html` links `variant.docx_path` for download next to the
+`queue_list.html` gained a third "Approved" table this checkpoint
+(D48) -- title/company/profile/apply link/`.docx` download link
+(`_resume_static_url()` reused a third time, precomputed per row in
+`queue_list()` into a `docx_urls` dict passed alongside `applications`
+since Jinja can't call a Python module-level function directly)/status
+text/a link to the existing detail page; `queue_detail.html` links `variant.docx_path` for download next to the
 existing inline PDF embed, `_resume_static_url()` reused for both, no
 longer PDF-specific despite the name; the previously-unconditional
 Approve button is three mutually exclusive states (D42) -- a passing
@@ -494,8 +482,12 @@ template context this checkpoint (D46) so "Hard failures" shows a
 human-readable name/explanation per rule alongside the existing terse
 `detail` text; `.rule-explanation` CSS added. `uv run uvicorn
 jobengine.web.app:app --reload` (CLAUDE.md's already-documented dev
-command). Tests: `test_web_app.py`, 21 tests (up from 20, +1 this
-checkpoint for D46's friendly-rule-name rendering), covering first-visit
+command). Tests: `test_web_app.py`, 25 tests (up from 21, +4 this
+checkpoint for D48: the Approved section shows an approved entry with
+working apply/`.docx` links, an approved job appears there and nowhere
+else on the page, an approved entry survives outside
+`_LIST_WINDOW_DAYS`, and the section renders its empty-state message
+when nothing's approved yet), covering first-visit
 trigger, second-visit idempotency,
 approve/reject state transitions and their `applications`-row side
 effects, the list page dropping a rejected job, `_new_pairs()`'s
@@ -508,8 +500,8 @@ without-override 409 on a soft failure, with-override succeeds and sets
 `accepted=True`, the detail page shows the right button for each).
 `_seed_job()`'s default `first_seen_at` is relative to `now` rather
 than a fixed literal date, avoiding the 7-day-window staleness a fixed
-date would eventually cause; gained an optional `apply_url` kwarg this
-checkpoint (default `None`, every existing call site unaffected).
+date would eventually cause; gained an optional `apply_url` kwarg
+(default `None`, every existing call site unaffected).
 
 **apply/** (`src/jobengine/apply/`, new this checkpoint, G1): `form_schema.py`
 — `FormField`/`FormSchema`/`ApplyConfig`/`AutonomyClassification`
@@ -555,38 +547,36 @@ of truth) but real disk clutter accumulating every test run since
 F1 shipped; worth scoping the output root into `QueueContext` (or a
 test fixture override) if it ever needs cleaning up for real.
 
-**Full suite: 504/504 passing (up from 499 two checkpoints ago, net
-unchanged this checkpoint -- D47 added 0 net tests, but did fix 2 real
-regressions the retag caused, see above), `ruff check src/ tests/`
-clean, `ruff format --check` clean on every file this checkpoint
-touched** (the pre-existing `RUF059`-adjacent formatting-only diffs in
-`test_db.py`/`test_db_migrate.py`/`test_profiles_brief.py`/
+**Full suite: 511 collected, 506 passing, 5 failing (up from 504/504 --
+D48 added 7 net tests). The 5 failures are all in `test_batch.py`
+(`test_list_unscored_open_jobs_includes_open_unscored_job_in_window`
+and 4 others, a stale relative-date fixture unrelated to anything this
+checkpoint touched) and are pre-existing on `main` -- confirmed via
+`git stash` before writing this up, not assumed.** `ruff check src/
+tests/` clean; `ruff format --check` clean on every file this
+checkpoint touched (the pre-existing `RUF059`-adjacent formatting-only
+diffs in `test_db.py`/`test_db_migrate.py`/`test_profiles_brief.py`/
 `test_render.py`/`test_slop_lint.py` noted at past checkpoints are
-untouched by this checkpoint's own edits).
+still untouched by this checkpoint's own edits).
 
 **`data/jobengine.db` real accumulated state, verified fresh this
-checkpoint, not carried forward -- real usage kept moving the db
-between checkpoints again:** 15 companies (unchanged), 4755 jobs (up
-from 4685 -- real `sync` firings, none from this session's own work),
-36 `runs` rows (up from 33), `relevance_scores` 1029 rows/951 distinct
-jobs (unchanged), `job_analysis` 95 rows/82 distinct jobs (up from 91 --
-real reviews between checkpoints), `keyword_corpus` 222 rows (up from
-220), `job_resume_variants`/`rubric_results` **4/4** (down from 8 this
-session: D47 deleted 4 stale pending rows -- ids 11/12/14/15 -- and
-re-rendered the other 4, ids 2/8/10/13, in place against the retagged
-bank), `applications` **4** (up from 3 since last checkpoint from real
-usage -- job 4306 approved for real between checkpoints, `accepted=1`,
-before this session started; D47 itself touched none of the 4
-`applications` rows, by design, same as D45), `gap_ledger` **36 rows**
-(up from 19 -- real reviews between checkpoints; D47's own 4 re-renders
-added none, deliberately, since P4 lives in `ensure_reviewed()` not
-`run_ladder()`, see D47), 4 `base_resumes` rows (unchanged, and now
-doubly stale -- both the identity-line issue D45 fixed for variants and
-the missing-tech-tag issue D47 just fixed for variants, neither applied
-to the base resumes themselves, still flagged not fixed). All 4
-surviving `job_resume_variants` rows (2, 8, 10, 13) now reflect the
-retagged bank's real coverage numbers, confirmed directly, not
-assumed: 0.10/0.50/0.50/0.333 respectively. `daily_cap`
+checkpoint via a read-only query (hard rule 13: this session made zero
+writes to the real db, D48 is a pure read path), not carried forward --
+real usage kept moving the db between checkpoints again:** 15 companies
+(unchanged), 4854 jobs (up from 4755 -- real `sync` firings, none from
+this session's own work), 38 `runs` rows (up from 36), `relevance_scores`
+1029 rows/951 distinct jobs (unchanged), `job_analysis` 100 rows/86
+distinct jobs (up from 95/82 -- real reviews between checkpoints),
+`keyword_corpus` 232 rows (up from 222), `job_resume_variants`/
+`rubric_results` **18/18** (up from 4 -- real usage between checkpoints,
+none from this session), `applications` **8** (up from 4 -- real
+approvals between checkpoints; D48 itself wrote nothing to any of these
+tables, it only reads them), `gap_ledger` **101 rows** (up from 36 --
+real reviews between checkpoints), 4 `base_resumes` rows (unchanged,
+still doubly stale per D45/D47, not touched this session). D48's new
+"Approved" section on `GET /` now has 8 real rows to render against,
+not a synthetic count -- the disappearing-job problem it fixes was a
+real, current gap against this exact data, not a hypothetical. `daily_cap`
 is still `null`; `min_relevance_score: 20` (D37) remains the only live
 relevance-score gate on `web/app.py`'s `_new_pairs()`; D40's seniority
 exclusion is a second, independent gate upstream of it, in
@@ -601,6 +591,32 @@ B3 filter + the relevance floor): **293 of those (51.1%) are
 
 ## Known issues and deferred work
 
+- **New this checkpoint (D48), a real currently-broken test, found
+  while confirming the full suite, not caused by D48:** 5 tests in
+  `tests/test_batch.py` fail on `main` as of this checkpoint
+  (`test_list_unscored_open_jobs_includes_open_unscored_job_in_window`,
+  `test_run_daily_batch_scores_relevance_for_a_b3_survivor`,
+  `test_run_daily_batch_runs_extraction_only_for_floor_clearing_jobs`,
+  `test_run_daily_batch_extraction_is_one_call_per_job_not_per_profile`,
+  `test_run_daily_batch_records_a_runs_row`), all on the same assertion
+  shape (`counts["candidate_jobs"] == 1` but gets `0`). Confirmed
+  pre-existing via `git stash` before this session's changes -- same 5
+  failures on a clean `main`. Not investigated further (`pipeline/
+  batch.py` is outside D48's scope); looks like the same class of
+  stale-relative-date fixture bug flagged elsewhere in this file (e.g.
+  `_seed_job()`'s own comment in `test_web_app.py`), worth a real look
+  next time anyone touches `pipeline/batch.py` or its tests.
+- **New this checkpoint (D48), a real but currently unreachable
+  consequence, not a new bug:** D44 already flagged that
+  `orchestrate.approve()` has no guard against firing twice for the
+  same variant (no unique index on `applications.resume_variant_id`).
+  D48's new "Approved" section on `GET /` reads `applications` directly
+  with no dedup, so if that guard is ever missing when a future
+  automated path (G3/G4) calls `approve()` twice, the section would
+  render two rows for the same job rather than silently hiding the
+  duplicate. Correct behavior given the table's real contents, but
+  worth remembering as a second-order effect if D44's guard is ever
+  built and its absence is ever actually hit.
 - **New this checkpoint (D47), needs your input specifically:**
   `b_bantrly_01` carries a real `SQL` tag (added by the retag) but its
   `profiles` list is `['ai_ml_engineer', 'software_engineer']`, not
@@ -1494,6 +1510,20 @@ B3 filter + the relevance floor): **293 of those (51.1%) are
 
 ## Decisions made during implementation
 
+- This checkpoint (D48): the new "Approved" section on `GET /` reads
+  from `applications`, not `job_resume_variants.review_status =
+  'approved'` -- confirmed by asking before writing any code.
+  `is_already_applied()` (`pipeline/filter.py`) already treats
+  `applications` as the authoritative "have I applied" signal, and it's
+  the table that will carry submission-specific fields later
+  (`submitted_at`, a real `autonomy_level`), so this section reuses
+  that same authority rather than introducing a second, divergence-prone
+  notion of "approved." Also confirmed: no `_LIST_WINDOW_DAYS` scoping
+  (the whole point of the section is that an approved job must not age
+  out), and `applications.status` renders as plain text with no
+  filter/badge (every real row is `'queued'` today, nothing writes
+  anything else). Significant enough to also be recorded as D48 in
+  docs/decisions.md.
 - This checkpoint: the daily batch orchestrator (`pipeline/batch.py`)
   runs once daily on its own Task Scheduler entry, not chained onto
   `sync.sh`'s 3h cadence, and gates C3 extraction on C4's relevance
@@ -1831,6 +1861,39 @@ B3 filter + the relevance floor): **293 of those (51.1%) are
 ## Session log
 
 (Newest first. Date, task id, what changed, what to do next.)
+
+- 2026-08-20, D48 (done): `GET /` gains a third "Approved" section,
+  fixing the dead end where an approved job had no list view of its
+  own (D44 fixed the immediate approve-redirect dead end, but there was
+  still no way to see the accumulated set of approved jobs other than a
+  direct SQL query against the real db). Three decisions made explicit
+  and confirmed before coding: (1) sourced from `applications`, not
+  `job_resume_variants.review_status='approved'` -- `applications` is
+  what `is_already_applied()` already treats as authoritative, and it's
+  the table that will carry submission-specific fields later; (2) no
+  `_LIST_WINDOW_DAYS` scoping -- an approved-but-unsubmitted job must
+  never age out, `list_applications()` takes no date argument;
+  (3) `applications.status` stays plain text, no badge/filter, since
+  every real row is `'queued'` and nothing writes anything else yet.
+  Built `db/models.py`'s `ApplicationEntry`/`list_applications()`
+  (applications joined to jobs/job_resume_variants, no `WHERE`),
+  wired into `web/app.py`'s `queue_list()`, rendered in
+  `queue_list.html` with title/company/profile/apply link/`.docx`
+  download link (added after review of the first draft -- the résumé
+  file is half of "approved, still need to submit," not just the apply
+  URL)/status/a link to the existing detail page. 7 new tests,
+  tests-first (`test_db.py` +3, `test_web_app.py` +4). Verified against
+  the real db read-only: 8 real `applications` rows exist right now, a
+  real population for this section to render, not a hypothetical one.
+  Found, not caused: 5 pre-existing `test_batch.py` failures, confirmed
+  via `git stash` to already exist on `main`, unrelated to this
+  session's files, flagged in Known Issues rather than fixed (out of
+  scope). Full suite 511 collected / 506 passing (the 5 above excepted),
+  `ruff check`/`format` clean on every file touched. Full writeup: D48,
+  docs/decisions.md.
+  Next: no next task chosen yet, needs your go-ahead; you're committing
+  this session's changes yourself. Same open items as before D48 (see
+  Current task above).
 
 - 2026-08-18, D47 (done): Real data operation against
   `data/jobengine.db`, planned read-only first (same constraints as

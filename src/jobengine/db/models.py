@@ -168,6 +168,25 @@ class QueueEntry(BaseModel):
     review_status: str
 
 
+class ApplicationEntry(BaseModel):
+    """One row for GET /'s "Approved" section: an applications row
+    joined with its job and job_resume_variant. applications, not
+    review_status='approved', is authoritative for "what have I applied
+    to" -- pipeline/filter.py's is_already_applied() already keys off
+    this table, and it carries submission-specific fields
+    job_resume_variants doesn't. Presentation-shaped, not a schema
+    table."""
+
+    application_id: int
+    job_id: int
+    profile: str
+    title: str
+    company_slug: str
+    apply_url: str | None = None
+    docx_path: str | None = None
+    status: str
+
+
 class RelevanceScore(BaseModel):
     job_id: int
     profile: str
@@ -672,6 +691,28 @@ def list_existing_variant_pairs(conn: sqlite3.Connection) -> set[tuple[int, str]
     reappear as "new" once it's been reviewed."""
     rows = conn.execute("SELECT job_id, profile FROM job_resume_variants").fetchall()
     return {(row["job_id"], row["profile"]) for row in rows}
+
+
+def list_applications(conn: sqlite3.Connection) -> list[ApplicationEntry]:
+    """Every applications row, joined to its job and job_resume_variant,
+    for GET /'s "Approved" section. Deliberately unscoped by any date
+    window (unlike _recent_open_jobs()/_new_pairs() in web/app.py): an
+    approved-but-unsubmitted job must not silently age out of this list,
+    that is the exact problem this section exists to fix."""
+    rows = conn.execute(
+        """
+        SELECT
+            a.id AS application_id, a.job_id AS job_id, v.profile AS profile,
+            j.title AS title, j.company_slug AS company_slug,
+            j.apply_url AS apply_url, v.docx_path AS docx_path,
+            a.status AS status
+        FROM applications a
+        JOIN jobs j ON j.id = a.job_id
+        JOIN job_resume_variants v ON v.id = a.resume_variant_id
+        ORDER BY a.id DESC
+        """
+    ).fetchall()
+    return [ApplicationEntry(**dict(row)) for row in rows]
 
 
 def upsert_relevance_score(conn: sqlite3.Connection, score: RelevanceScore) -> None:

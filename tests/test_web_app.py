@@ -612,3 +612,85 @@ def test_approve_on_never_reviewed_pair_returns_404(conn, client_factory):
         f"/jobs/{job_id}/software_engineer/approve", follow_redirects=False
     )
     assert response.status_code == 404
+
+
+# --- D48: the "Approved" section on GET / -- an approved job used to
+# disappear from both existing sections with no list view of its own,
+# the only way to see it was a direct SQL query. See docs/decisions.md.
+
+
+def test_list_page_shows_approved_entry_with_apply_and_resume_links(
+    conn, client_factory
+):
+    job_id = _seed_job(conn, apply_url="https://job-boards.greenhouse.io/acme/jobs/1")
+    _seed_base_resume(conn)
+    client = client_factory(_FakeClient(_EXTRACT_PAYLOAD))
+    client.get(f"/jobs/{job_id}/software_engineer")
+    client.post(
+        f"/jobs/{job_id}/software_engineer/approve",
+        data={"override_soft_failure": "true"},
+        follow_redirects=False,
+    )
+
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert "Software Engineer" in response.text
+    assert 'href="https://job-boards.greenhouse.io/acme/jobs/1"' in response.text
+    variant = get_job_resume_variant(conn, job_id, "software_engineer")
+    docx_url = "/resume/" + variant.docx_path.removeprefix("resume/")
+    assert f'href="{docx_url}"' in response.text
+    assert f'href="/jobs/{job_id}/software_engineer"' in response.text
+
+
+def test_list_page_omits_approved_entry_from_the_other_two_sections(
+    conn, client_factory
+):
+    job_id = _seed_job(conn, title="Uniquely Titled Engineer Role")
+    _seed_base_resume(conn)
+    client = client_factory(_FakeClient(_EXTRACT_PAYLOAD))
+    client.get(f"/jobs/{job_id}/software_engineer")
+    client.post(
+        f"/jobs/{job_id}/software_engineer/approve",
+        data={"override_soft_failure": "true"},
+        follow_redirects=False,
+    )
+
+    response = client.get("/")
+
+    assert response.text.count("Uniquely Titled Engineer Role") == 1
+
+
+def test_list_page_approved_entry_survives_outside_the_list_window(
+    conn, client_factory
+):
+    """Unlike the other two GET / sections, an approved-but-unsubmitted
+    job must not age out after _LIST_WINDOW_DAYS -- that disappearing
+    act is exactly the dead end this section exists to fix."""
+    job_id = _seed_job(
+        conn,
+        title="Old Approved Engineer Role",
+        first_seen_at="2020-01-01T00:00:00+00:00",
+    )
+    _seed_base_resume(conn)
+    client = client_factory(_FakeClient(_EXTRACT_PAYLOAD))
+    client.get(f"/jobs/{job_id}/software_engineer")
+    client.post(
+        f"/jobs/{job_id}/software_engineer/approve",
+        data={"override_soft_failure": "true"},
+        follow_redirects=False,
+    )
+
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert "Old Approved Engineer Role" in response.text
+
+
+def test_list_page_shows_no_approved_jobs_message_when_none(conn, client_factory):
+    client = client_factory(_FakeClient(_EXTRACT_PAYLOAD))
+
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert "Approved" in response.text

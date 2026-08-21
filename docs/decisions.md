@@ -2711,3 +2711,109 @@ uncovered were both there too) -- updated for consistency and
 accuracy, not left silently out of sync with its sibling file. Full
 suite re-confirmed green after the fix: 504/504, `ruff check`/`format
 --check` clean on both touched test files.
+
+**D48. `GET /` gains a third section, "Approved," sourced from
+`applications` and deliberately unscoped by `_LIST_WINDOW_DAYS`,
+closing the dead end D44 left open: an approved job had no list view
+of its own, the only way to see what you'd applied to was a direct SQL
+query against `data/jobengine.db`.**
+
+Three decisions, all made explicit and confirmed before any code was
+written, per the user's own instruction not to assume:
+
+1. **Source of truth: `applications`, not `job_resume_variants.
+   review_status = 'approved'`.** The two are 1:1 in practice today --
+   `insert_application()`'s own docstring says a row is only ever
+   created on review approval, `queue/orchestrate.py`'s `approve()` is
+   the only call site -- but they are not the same concept.
+   `pipeline/filter.py`'s `is_already_applied()` already keys off
+   `applications`, not `review_status`, for exactly this "have I
+   applied" question, and that is the existing precedent this decision
+   follows rather than introducing a second, divergence-prone notion of
+   "approved." `applications` also carries fields `job_resume_variants`
+   doesn't (`status`, `submitted_at`, `autonomy_level`) that this
+   section or a future one will want. Known caveat, already flagged as
+   D44's own open item: `approve()` has no guard against firing twice
+   for one variant, so `applications` could in theory hold more rows
+   than approved variants once something automated (G3/G4) calls
+   `approve()` more than once. Not a problem for this section --
+   querying `applications` directly and rendering one row per
+   application is the correct behavior regardless of whether that guard
+   ever lands, not a workaround for its absence.
+2. **No `_LIST_WINDOW_DAYS` scoping.** The other two `GET /` sections
+   use the 7-day window to bound a scan over the whole `jobs` table for
+   things not yet acted on. This section is the opposite: a small,
+   bounded set of things already acted on, looked up directly via
+   `applications` rows, never by scanning `jobs`. Filtering it by
+   `first_seen_at` would silently drop an approved-but-unsubmitted job
+   off the list after a week -- exactly the disappearing-job problem
+   this section exists to fix, not a variant of it. `list_applications()`
+   therefore takes no date argument at all, confirmed by a real test
+   seeding a job with `first_seen_at` in 2020.
+3. **`applications.status` renders as plain text, no filter or badge.**
+   Every real row is `'queued'` today (confirmed via a live, read-only
+   query against `data/jobengine.db`: 8/8 real applications rows), and
+   nothing in the codebase writes any other value -- `approve()`
+   hardcodes `status="queued"`. A filter or badge over a column with
+   exactly one observed value is speculative UI for outcome tracking
+   (the H-series) that doesn't exist yet, not a reasonable minimal
+   feature.
+
+**Implementation:** `db/models.py` gains `ApplicationEntry` (a
+presentation-shaped model, mirroring `QueueEntry`'s own precedent) and
+`list_applications()` -- `applications JOIN jobs JOIN job_resume_
+variants`, `ORDER BY a.id DESC`, no `WHERE`. `web/app.py`'s
+`queue_list()` calls it and precomputes a `{application_id:
+docx_url}` dict via the existing `_resume_static_url()` (Jinja can't
+call a Python module-level function directly, so this has to happen in
+the route, not the template -- same reason `pdf_url`/`docx_url` are
+already precomputed for `queue_detail()`). `queue_list.html` gains the
+third table: title, company, profile, an `<a href>` apply link (or
+`-` when `job.apply_url` is null, same convention `queue_detail.html`
+already uses), a `.docx` download link, status text, and a link back to
+the existing `/jobs/{job_id}/{profile}` detail page. The `.docx` link
+was added after the user's review of the first draft of this plan,
+which covered only the apply URL: the section's stated purpose is
+"approved, still need to submit," and the résumé file is the other half
+of what that requires -- without it, every row would still need a
+click-through to the detail page just to get the file, defeating the
+point of a list view.
+
+7 new tests, tests-first per hard rule 7: `test_db.py` gains
+`test_list_applications_empty_when_none`,
+`test_list_applications_returns_joined_row` (asserts every field
+`ApplicationEntry` exposes, including `docx_path`), and
+`test_list_applications_not_scoped_to_a_recent_window` (a job seeded
+with `first_seen_at="2020-01-01..."` still appears -- the regression
+guard for decision 2). `test_web_app.py` gains
+`test_list_page_shows_approved_entry_with_apply_and_resume_links`,
+`test_list_page_omits_approved_entry_from_the_other_two_sections`
+(re-confirms the existing D44 behavior still holds under the new
+section, not just that the new section itself works),
+`test_list_page_approved_entry_survives_outside_the_list_window`, and
+`test_list_page_shows_no_approved_jobs_message_when_none`. Two of these
+tests initially failed for an unrelated reason during writing: their
+job titles ("Uniquely Titled Role", "Old Approved Role") didn't contain
+"engineer", so `matches_profiles()` returned no match, `analyze_job()`
+skipped the LLM call entirely, and `ensure_reviewed()`'s first line
+(`analysis.required_keywords`) hit `AttributeError` on the resulting
+`None` -- a real gap in `ensure_reviewed()`'s handling of a job that
+matches no profile, surfaced by test authoring, not by design; fixed
+by renaming the test fixtures' titles to contain "Engineer" rather than
+patching `ensure_reviewed()`, since triggering a genuinely unmatched
+profile was never this test's intent. Not filed as a new known issue
+since every real call site already gates on `matches_profiles()`
+returning a real profile before calling `ensure_reviewed()` (`_new_pairs()`
+in `web/app.py`) -- this was a test-fixture-only path, not a reachable
+production one.
+
+No schema change (both tables and their join already existed), no new
+dependencies, read-only against the real `data/jobengine.db` throughout
+(only used for the live read-only counts quoted above, per hard rule
+13). Verified against the real db: 8 real `applications` rows exist as
+of this checkpoint, confirming the section has a real population to
+render, not a hypothetical one. Full suite: 511 collected, 506 passing
+-- the other 5 (`test_batch.py`) are a pre-existing failure on `main`,
+confirmed via `git stash` before writing this up, unrelated to any file
+this session touched. `ruff check`/`format --check` clean on every file
+this session touched.

@@ -28,6 +28,7 @@ from jobengine.db.models import (
     get_job_by_id,
     get_job_resume_variant,
     get_rubric_results,
+    list_applications,
     list_existing_variant_pairs,
 )
 from jobengine.llm.router import load_config as load_llm_config
@@ -139,8 +140,19 @@ def queue_list(
 ):
     entries = orchestrate.list_queue(ctx.conn)
     new_pairs = _new_pairs(ctx)
+    applications = list_applications(ctx.conn)
+    docx_urls = {
+        a.application_id: _resume_static_url(a.docx_path) for a in applications
+    }
     return templates.TemplateResponse(
-        request, "queue_list.html", {"entries": entries, "new_pairs": new_pairs}
+        request,
+        "queue_list.html",
+        {
+            "entries": entries,
+            "new_pairs": new_pairs,
+            "applications": applications,
+            "docx_urls": docx_urls,
+        },
     )
 
 

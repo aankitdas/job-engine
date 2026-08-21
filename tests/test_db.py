@@ -28,6 +28,7 @@ from jobengine.db.models import (
     insert_rubric_results,
     latest_base_resume,
     latest_base_resume_version,
+    list_applications,
     list_existing_variant_pairs,
     list_pending_review_queue,
     list_relevance_scores_for_cutoff,
@@ -664,6 +665,72 @@ def test_list_existing_variant_pairs_includes_pending_and_reviewed(
 
 def test_list_existing_variant_pairs_empty_when_no_variants(conn):
     assert list_existing_variant_pairs(conn) == set()
+
+
+def test_list_applications_empty_when_none(conn):
+    assert list_applications(conn) == []
+
+
+def test_list_applications_returns_joined_row(conn_with_job_and_base_resume):
+    """The approved-jobs section on GET / reads this. Must carry enough
+    to render title/company/profile/apply link/resume link/status
+    without a second query per row."""
+    conn, job_id, resume_id = conn_with_job_and_base_resume
+    conn.execute(
+        "UPDATE jobs SET apply_url = ? WHERE id = ?",
+        ("https://job-boards.greenhouse.io/acme/jobs/1", job_id),
+    )
+    variant_id = insert_job_resume_variant(conn, _variant(job_id, resume_id))
+    insert_application(
+        conn,
+        Application(
+            job_id=job_id,
+            resume_variant_id=variant_id,
+            autonomy_level=0,
+            status="queued",
+        ),
+    )
+
+    entries = list_applications(conn)
+
+    assert len(entries) == 1
+    entry = entries[0]
+    assert entry.job_id == job_id
+    assert entry.profile == "software_engineer"
+    assert entry.title == "Software Engineer"
+    assert entry.company_slug == "acme"
+    assert entry.apply_url == "https://job-boards.greenhouse.io/acme/jobs/1"
+    assert (
+        entry.docx_path == "resume/rendered/variants/1/software_engineer/candidate.docx"
+    )
+    assert entry.status == "queued"
+
+
+def test_list_applications_not_scoped_to_a_recent_window(conn_with_company):
+    """Unlike the other two GET / sections, an approved application must
+    never age out -- it is the fix for the disappearing-approved-job
+    problem, not another instance of it. list_applications() takes no
+    date argument at all; this test just pins that down as a real
+    assertion rather than leaving it implicit by seeding a job whose
+    first_seen_at is years outside any plausible lookback window."""
+    conn = conn_with_company
+    job_id = upsert_job(conn, _job(first_seen_at="2020-01-01T00:00:00+00:00"))
+    resume_id = insert_base_resume(conn, _base_resume(profile="software_engineer"))
+    variant_id = insert_job_resume_variant(conn, _variant(job_id, resume_id))
+    insert_application(
+        conn,
+        Application(
+            job_id=job_id,
+            resume_variant_id=variant_id,
+            autonomy_level=0,
+            status="queued",
+        ),
+    )
+
+    entries = list_applications(conn)
+
+    assert len(entries) == 1
+    assert entries[0].job_id == job_id
 
 
 # ---------------------------------------------------------------------------

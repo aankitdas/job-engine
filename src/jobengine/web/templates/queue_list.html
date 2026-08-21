@@ -50,5 +50,25 @@
   {% else %}
   <p>No new matches in the last 7 days.</p>
   {% endif %}
+
+  <h2>Approved</h2>
+  {% if applications %}
+  <table>
+    <tr><th>Job</th><th>Company</th><th>Profile</th><th>Apply</th><th>Resume</th><th>Status</th><th></th></tr>
+    {% for a in applications %}
+    <tr>
+      <td>{{ a.title }}</td>
+      <td>{{ a.company_slug }}</td>
+      <td>{{ a.profile }}</td>
+      <td>{% if a.apply_url %}<a href="{{ a.apply_url }}">Apply</a>{% else %}-{% endif %}</td>
+      <td>{% if docx_urls[a.application_id] %}<a href="{{ docx_urls[a.application_id] }}" download>.docx</a>{% else %}-{% endif %}</td>
+      <td>{{ a.status }}</td>
+      <td><a href="/jobs/{{ a.job_id }}/{{ a.profile }}">Detail</a></td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p>Nothing approved yet.</p>
+  {% endif %}
 </body>
 </html>
