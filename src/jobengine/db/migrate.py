@@ -7,7 +7,7 @@ from pathlib import Path
 
 DEFAULT_DB_PATH = Path("data/jobengine.db")
 
-_SCHEMA_VERSION = "0002_job_resume_variants_review_state"
+_SCHEMA_VERSION = "0003_variant_claims"
 
 
 def connect(

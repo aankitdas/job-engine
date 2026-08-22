@@ -693,6 +693,87 @@ def list_existing_variant_pairs(conn: sqlite3.Connection) -> set[tuple[int, str]
     return {(row["job_id"], row["profile"]) for row in rows}
 
 
+def list_recent_open_jobs(conn: sqlite3.Connection, window_days: int) -> list[Job]:
+    """Open jobs (closed_at IS NULL) first seen within the last
+    window_days days, ordered by (first_seen_at, id) for deterministic
+    processing order -- same datetime('now', ?) cutoff style as
+    list_unscored_open_jobs() above. Shared by pipeline/batch.py's
+    list_candidate_pairs() (and, through that, web/app.py's queue-list
+    page) so "recent" means one thing everywhere, matching WINDOW_DAYS'
+    own single-source-of-truth precedent (D38)."""
+    rows = conn.execute(
+        """
+        SELECT * FROM jobs
+        WHERE closed_at IS NULL AND first_seen_at >= datetime('now', ?)
+        ORDER BY first_seen_at, id
+        """,
+        (f"-{window_days} days",),
+    ).fetchall()
+    return [Job(**dict(row)) for row in rows]
+
+
+def claim_variant(
+    conn: sqlite3.Connection,
+    job_id: int,
+    profile: str,
+    claimed_by: str,
+    now: str,
+    stale_cutoff: str,
+) -> bool:
+    """Atomic claim attempt on a (job_id, profile) pair, backing
+    ensure_reviewed()'s mutex (queue/orchestrate.py). The INSERT is the
+    fast path and wins outright when nothing holds the pair; a failed
+    INSERT (already claimed) falls back to an UPDATE that only succeeds
+    if the existing claim's claimed_at is older than stale_cutoff, so an
+    abandoned claim (owning process crashed mid-ladder) is reclaimable
+    without any separate sweep -- see STALE_CLAIM_SECONDS in
+    queue/orchestrate.py for why the threshold is where it is. Commits
+    immediately (unlike most of this module) because the claim only
+    works as a cross-process mutex if a claim made on one connection is
+    visible to a different connection's next attempt right away, not
+    batched with whatever the caller commits later."""
+    try:
+        conn.execute(
+            "INSERT INTO variant_claims (job_id, profile, claimed_by, claimed_at) "
+            "VALUES (?, ?, ?, ?)",
+            (job_id, profile, claimed_by, now),
+        )
+        conn.commit()
+        return True
+    except sqlite3.IntegrityError:
+        pass
+
+    cursor = conn.execute(
+        "UPDATE variant_claims SET claimed_by = ?, claimed_at = ? "
+        "WHERE job_id = ? AND profile = ? AND claimed_at < ?",
+        (claimed_by, now, job_id, profile, stale_cutoff),
+    )
+    conn.commit()
+    return cursor.rowcount == 1
+
+
+def release_claim(conn: sqlite3.Connection, job_id: int, profile: str) -> None:
+    """Idempotent: releasing a pair with no claim is a no-op, not an
+    error, so ensure_reviewed()'s finally block never needs to guard on
+    whether claim_variant() actually succeeded first. Commits
+    immediately, same cross-process-visibility reasoning as
+    claim_variant()."""
+    conn.execute(
+        "DELETE FROM variant_claims WHERE job_id = ? AND profile = ?",
+        (job_id, profile),
+    )
+    conn.commit()
+
+
+def list_claims(conn: sqlite3.Connection) -> set[tuple[int, str]]:
+    """Every (job_id, profile) pair currently claimed (mid-render, by
+    either the web app or pipeline/batch.py). Used by the queue list
+    page to distinguish "processing" from "queued" among candidate
+    pairs that have no job_resume_variant yet."""
+    rows = conn.execute("SELECT job_id, profile FROM variant_claims").fetchall()
+    return {(row["job_id"], row["profile"]) for row in rows}
+
+
 def list_applications(conn: sqlite3.Connection) -> list[ApplicationEntry]:
     """Every applications row, joined to its job and job_resume_variant,
     for GET /'s "Approved" section. Deliberately unscoped by any date

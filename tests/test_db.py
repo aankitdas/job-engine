@@ -1,4 +1,5 @@
 import sqlite3
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -13,6 +14,7 @@ from jobengine.db.models import (
     Outcome,
     RelevanceScore,
     RubricResultRow,
+    claim_variant,
     find_job_resume_variant_by_hash,
     get_company,
     get_job,
@@ -29,9 +31,12 @@ from jobengine.db.models import (
     latest_base_resume,
     latest_base_resume_version,
     list_applications,
+    list_claims,
     list_existing_variant_pairs,
     list_pending_review_queue,
+    list_recent_open_jobs,
     list_relevance_scores_for_cutoff,
+    release_claim,
     update_relevance_selection,
     update_review_status,
     upsert_company,
@@ -665,6 +670,122 @@ def test_list_existing_variant_pairs_includes_pending_and_reviewed(
 
 def test_list_existing_variant_pairs_empty_when_no_variants(conn):
     assert list_existing_variant_pairs(conn) == set()
+
+
+# ---------------------------------------------------------------------------
+# F1-followup: variant_claims (claim_variant / release_claim / list_claims)
+# and list_recent_open_jobs (moved out of web/app.py's former
+# _recent_open_jobs() for reuse by pipeline/batch.py's prefetch stage)
+# ---------------------------------------------------------------------------
+
+
+def test_claim_variant_succeeds_when_nothing_holds_the_pair(
+    conn_with_job_and_base_resume,
+):
+    conn, job_id, _ = conn_with_job_and_base_resume
+    now = "2026-08-20T00:00:00+00:00"
+    cutoff = "2026-08-19T00:00:00+00:00"
+
+    claimed = claim_variant(conn, job_id, "software_engineer", "web", now, cutoff)
+
+    assert claimed is True
+    assert (job_id, "software_engineer") in list_claims(conn)
+
+
+def test_claim_variant_fails_when_already_claimed_and_not_stale(
+    conn_with_job_and_base_resume,
+):
+    conn, job_id, _ = conn_with_job_and_base_resume
+    now = "2026-08-20T00:00:00+00:00"
+    cutoff = "2026-08-19T00:00:00+00:00"  # 1 day before now: existing claim not stale
+    claim_variant(conn, job_id, "software_engineer", "web", now, cutoff)
+
+    second = claim_variant(
+        conn, job_id, "software_engineer", "batch", "2026-08-20T00:05:00+00:00", cutoff
+    )
+
+    assert second is False
+
+
+def test_claim_variant_reclaims_a_stale_claim(conn_with_job_and_base_resume):
+    """A claim whose owning process died mid-ladder (crash, Ctrl+C, a
+    reload) must not block that pair forever -- a later attempt whose
+    stale_cutoff is newer than the abandoned claim's claimed_at wins it."""
+    conn, job_id, _ = conn_with_job_and_base_resume
+    claim_variant(
+        conn,
+        job_id,
+        "software_engineer",
+        "web",
+        "2026-08-20T00:00:00+00:00",
+        "2026-08-19T00:00:00+00:00",
+    )
+
+    reclaimed = claim_variant(
+        conn,
+        job_id,
+        "software_engineer",
+        "batch",
+        "2026-08-20T01:00:00+00:00",
+        "2026-08-20T00:30:00+00:00",  # older claim (00:00) is before this cutoff
+    )
+
+    assert reclaimed is True
+
+
+def test_release_claim_is_idempotent_on_an_unclaimed_pair(
+    conn_with_job_and_base_resume,
+):
+    conn, job_id, _ = conn_with_job_and_base_resume
+    release_claim(conn, job_id, "software_engineer")  # must not raise
+    assert list_claims(conn) == set()
+
+
+def test_release_claim_removes_the_claim(conn_with_job_and_base_resume):
+    conn, job_id, _ = conn_with_job_and_base_resume
+    claim_variant(
+        conn,
+        job_id,
+        "software_engineer",
+        "web",
+        "2026-08-20T00:00:00+00:00",
+        "2026-08-19T00:00:00+00:00",
+    )
+
+    release_claim(conn, job_id, "software_engineer")
+
+    assert list_claims(conn) == set()
+
+
+def test_list_recent_open_jobs_includes_job_within_window(conn_with_company):
+    conn = conn_with_company
+    recent = (datetime.now(UTC) - timedelta(days=1)).isoformat()
+    job_id = upsert_job(conn, _job(first_seen_at=recent, last_seen_at=recent))
+
+    jobs = list_recent_open_jobs(conn, window_days=7)
+
+    assert job_id in [j.id for j in jobs]
+
+
+def test_list_recent_open_jobs_excludes_job_outside_window(conn_with_company):
+    conn = conn_with_company
+    job_id = upsert_job(conn, _job())  # fixed 2026-08-07 date, well outside 7 days
+
+    jobs = list_recent_open_jobs(conn, window_days=7)
+
+    assert job_id not in [j.id for j in jobs]
+
+
+def test_list_recent_open_jobs_excludes_closed_job(conn_with_company):
+    conn = conn_with_company
+    recent = (datetime.now(UTC) - timedelta(days=1)).isoformat()
+    job_id = upsert_job(
+        conn, _job(first_seen_at=recent, last_seen_at=recent, closed_at=recent)
+    )
+
+    jobs = list_recent_open_jobs(conn, window_days=7)
+
+    assert job_id not in [j.id for j in jobs]
 
 
 def test_list_applications_empty_when_none(conn):

@@ -13,16 +13,21 @@ schemas.
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
 
 from jobengine.db.migrate import connect, init
 from jobengine.db.models import (
+    BaseResume,
     Job,
     RelevanceScore,
+    claim_variant,
     get_job_analysis,
+    get_job_resume_variant,
     get_relevance_score,
+    insert_base_resume,
     list_unscored_open_jobs,
     upsert_job,
     upsert_relevance_score,
@@ -212,6 +217,28 @@ _EXTRACT_PAYLOAD = {
     "preferred_keywords": [],
     "tech_stack": ["Python", "FastAPI"],
 }
+
+# Empty required_keywords -> R001 trivially passes on P0 alone -> run_ladder()
+# stops before ever reaching P3, so this render stage's tests need no
+# rephrase-schema branch in _FakeClient (which only serves relevance/extract).
+_NO_GAP_EXTRACT_PAYLOAD = {
+    "required_keywords": [],
+    "preferred_keywords": [],
+    "tech_stack": [],
+}
+
+
+def _seed_base_resume(conn, profile="software_engineer") -> int:
+    return insert_base_resume(
+        conn,
+        BaseResume(
+            profile=profile,
+            version=1,
+            selection="{}",
+            section_order='["work_history", "projects", "education", "publications"]',
+            generated_at="2026-08-07T00:00:00+00:00",
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -461,6 +488,118 @@ def test_run_daily_batch_records_a_runs_row(conn):
     assert counts["relevance_scored_pairs"] == 1
     assert counts["floor_clearing_jobs"] == 1
     assert counts["extraction_scored_jobs"] == 1
+
+
+# ---------------------------------------------------------------------------
+# F1-followup: list_candidate_pairs() and the render stage it feeds
+# (moved out of web/app.py's former _new_pairs(), now shared with the
+# queue-list page so "candidate" means the same thing in both places)
+# ---------------------------------------------------------------------------
+
+
+def _recent_iso(days_ago: int = 1) -> str:
+    return (datetime.now(UTC) - timedelta(days=days_ago)).isoformat()
+
+
+def test_list_candidate_pairs_includes_a_floor_clearing_pair_with_no_variant(conn):
+    job_id = _seed_job(conn, first_seen_at=_recent_iso())
+    upsert_relevance_score(
+        conn,
+        RelevanceScore(
+            job_id=job_id,
+            profile="software_engineer",
+            score=80,
+            selected=0,
+            scored_at=_recent_iso(),
+        ),
+    )
+    conn.commit()
+
+    pairs = batch.list_candidate_pairs(conn, _filter_config(), _relevance_config())
+
+    assert (job_id, "software_engineer") in [(j.id, p) for j, p in pairs]
+
+
+def test_list_candidate_pairs_excludes_a_pair_scored_below_the_floor(conn):
+    job_id = _seed_job(conn, first_seen_at=_recent_iso())
+    upsert_relevance_score(
+        conn,
+        RelevanceScore(
+            job_id=job_id,
+            profile="software_engineer",
+            score=5,
+            selected=0,
+            scored_at=_recent_iso(),
+        ),
+    )
+    conn.commit()
+
+    pairs = batch.list_candidate_pairs(
+        conn, _filter_config(), _relevance_config(min_relevance_score=20)
+    )
+
+    assert (job_id, "software_engineer") not in [(j.id, p) for j, p in pairs]
+
+
+def test_run_daily_batch_renders_a_variant_for_a_candidate_pair(conn):
+    job_id = _seed_job(conn, first_seen_at=_recent_iso())
+    _seed_base_resume(conn)
+    client = _FakeClient(_HIGH_RELEVANCE_PAYLOAD, _NO_GAP_EXTRACT_PAYLOAD)
+
+    result = batch.run_daily_batch(
+        conn,
+        _filter_config(),
+        _relevance_config(),
+        _llm_config(),
+        _bank(),
+        local_client=client,
+    )
+
+    assert result.variants_rendered == 1
+    assert get_job_resume_variant(conn, job_id, "software_engineer") is not None
+
+
+def test_run_daily_batch_skips_a_candidate_pair_with_no_base_resume(conn):
+    """No base_resumes row for the profile yet (E2 not run) must not
+    fail the whole batch run -- just that one pair goes unrendered this
+    time, exactly like ensure_reviewed()'s NoBaseResumeError does for a
+    human's on-demand click."""
+    _seed_job(conn, first_seen_at=_recent_iso())
+    client = _FakeClient(_HIGH_RELEVANCE_PAYLOAD, _NO_GAP_EXTRACT_PAYLOAD)
+
+    result = batch.run_daily_batch(
+        conn,
+        _filter_config(),
+        _relevance_config(),
+        _llm_config(),
+        _bank(),
+        local_client=client,
+    )
+
+    assert result.variants_rendered == 0
+
+
+def test_run_daily_batch_skips_a_candidate_pair_already_claimed(conn):
+    """A pair mid-render elsewhere (another concurrent batch invocation,
+    or a human's on-demand click racing this run) must not be rendered
+    a second time here."""
+    job_id = _seed_job(conn, first_seen_at=_recent_iso())
+    _seed_base_resume(conn)
+    real_now = datetime.now(UTC).isoformat()
+    claim_variant(conn, job_id, "software_engineer", "web", real_now, real_now)
+    client = _FakeClient(_HIGH_RELEVANCE_PAYLOAD, _NO_GAP_EXTRACT_PAYLOAD)
+
+    result = batch.run_daily_batch(
+        conn,
+        _filter_config(),
+        _relevance_config(),
+        _llm_config(),
+        _bank(),
+        local_client=client,
+    )
+
+    assert result.variants_rendered == 0
+    assert get_job_resume_variant(conn, job_id, "software_engineer") is None
 
 
 # ---------------------------------------------------------------------------

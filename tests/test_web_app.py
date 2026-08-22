@@ -17,13 +17,17 @@ from jobengine.db.migrate import connect, init
 from jobengine.db.models import (
     BaseResume,
     Job,
+    JobAnalysis,
     JobResumeVariant,
     RubricResultRow,
+    claim_variant,
     get_job_resume_variant,
     insert_base_resume,
     insert_job_resume_variant,
     insert_rubric_results,
+    list_claims,
     upsert_job,
+    upsert_job_analysis,
 )
 from jobengine.llm.schemas import (
     ApiConfig,
@@ -694,3 +698,74 @@ def test_list_page_shows_no_approved_jobs_message_when_none(conn, client_factory
 
     assert response.status_code == 200
     assert "Approved" in response.text
+
+
+# --- F1-followup: per-pair Queued/Processing status on GET /, and the
+# on-demand detail route's 202 response when another caller (the
+# prefetch batch, or a concurrent request) already claimed the pair.
+
+
+def test_list_page_shows_queued_status_for_an_unclaimed_candidate(conn, client_factory):
+    _seed_job(conn, ats_job_id="untriggered", title="Backend Engineer")
+    client = client_factory(_FakeClient(_EXTRACT_PAYLOAD))
+
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert "Backend Engineer" in response.text
+    assert "Queued" in response.text
+
+
+def test_list_page_shows_processing_status_for_a_claimed_candidate(
+    conn, client_factory
+):
+    job_id = _seed_job(conn, ats_job_id="claimed", title="Backend Engineer")
+    real_now = datetime.now(UTC).isoformat()
+    claim_variant(conn, job_id, "software_engineer", "web", real_now, real_now)
+    client = client_factory(_FakeClient(_EXTRACT_PAYLOAD))
+
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert "Backend Engineer" in response.text
+    assert "Processing" in response.text
+
+
+def test_detail_page_returns_202_and_does_not_rerun_the_ladder_when_claimed(
+    conn, client_factory
+):
+    job_id = _seed_job(conn)
+    _seed_base_resume(conn)
+    # Pre-seed job_analysis so the assertion below isolates the
+    # claim-guarded ladder step: ensure_reviewed() always runs
+    # extraction first regardless of claim status (only the ladder+
+    # insert step is claim-protected), so without this the fake client
+    # would see one real extraction call and the assertion would fail
+    # for an unrelated reason.
+    upsert_job_analysis(
+        conn,
+        JobAnalysis(
+            job_id=job_id,
+            profile="software_engineer",
+            required_keywords='["Go", "Rust"]',
+            preferred_keywords="[]",
+            tech_stack='["Go", "Rust"]',
+            jd_quality="good",
+            keyword_hash="deadbeef",
+            analyzed_at="2026-08-20T00:00:00+00:00",
+            model="qwen3.5:9b-q4_K_M",
+            cost_usd=0.0,
+        ),
+    )
+    conn.commit()
+    real_now = datetime.now(UTC).isoformat()
+    claim_variant(conn, job_id, "software_engineer", "web", real_now, real_now)
+    fake = _FakeClient(_EXTRACT_PAYLOAD)
+    client = client_factory(fake)
+
+    response = client.get(f"/jobs/{job_id}/software_engineer")
+
+    assert response.status_code == 202
+    assert fake.calls == []  # never ran the ladder a second time
+    assert get_job_resume_variant(conn, job_id, "software_engineer") is None
+    assert (job_id, "software_engineer") in list_claims(conn)  # untouched, not ours

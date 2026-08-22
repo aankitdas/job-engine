@@ -13,7 +13,6 @@ the way patch.py's validate_rewrite() does.
 from __future__ import annotations
 
 import os
-from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
@@ -23,22 +22,18 @@ from fastapi.templating import Jinja2Templates
 
 from jobengine.db.migrate import DEFAULT_DB_PATH, connect
 from jobengine.db.models import (
-    Job,
     get_job_analysis,
     get_job_by_id,
     get_job_resume_variant,
     get_rubric_results,
     list_applications,
-    list_existing_variant_pairs,
+    list_claims,
 )
 from jobengine.llm.router import load_config as load_llm_config
 from jobengine.pipeline.batch import WINDOW_DAYS as _LIST_WINDOW_DAYS
-from jobengine.pipeline.filter import (
-    load_filter_config,
-    matches_profiles,
-    passes_all_filters,
-)
-from jobengine.pipeline.relevance import load_relevance_config, passes_relevance_floor
+from jobengine.pipeline.batch import list_candidate_pairs
+from jobengine.pipeline.filter import load_filter_config
+from jobengine.pipeline.relevance import load_relevance_config
 from jobengine.profiles.config import load_profile_config
 from jobengine.queue import orchestrate
 from jobengine.resume.bank import load_bank
@@ -95,51 +90,33 @@ if Path("resume").is_dir():
     app.mount("/resume", StaticFiles(directory="resume"), name="resume")
 
 
-def _recent_open_jobs(conn) -> list[Job]:
-    cutoff = (datetime.now(UTC) - timedelta(days=_LIST_WINDOW_DAYS)).isoformat()
-    rows = conn.execute(
-        "SELECT * FROM jobs WHERE first_seen_at >= ? AND closed_at IS NULL", (cutoff,)
-    ).fetchall()
-    return [Job(**dict(row)) for row in rows]
-
-
-def _new_pairs(ctx: orchestrate.QueueContext) -> list[tuple[Job, str]]:
-    """(job, profile) pairs that survive B3's full filter chain
-    (passes_all_filters: title match, US location, seniority,
-    employment type, citizenship/clearance, already-applied) AND C4's
-    relevance floor, but have never been triggered into a
-    job_resume_variant at all -- the "not yet reviewed" links on the
-    list page. Gated per-job on passes_all_filters() first;
-    matches_profiles() is then called again only for jobs that already
-    cleared every other check, to get the actual list of matched
-    profiles to iterate (passes_all_filters() itself only returns a
-    bool, not which profiles matched). passes_relevance_floor() is
-    per-(job, profile), so it runs inside that per-profile loop, after
-    matches_profiles() -- a job can clear the floor for one matched
-    profile and not another."""
-    existing = list_existing_variant_pairs(ctx.conn)
-    pairs = []
-    for job in _recent_open_jobs(ctx.conn):
-        if not passes_all_filters(ctx.conn, job, ctx.filter_config):
-            continue
-        for profile in matches_profiles(job, ctx.filter_config):
-            if (job.id, profile) in existing:
-                continue
-            if not passes_relevance_floor(
-                ctx.conn, job.id, profile, ctx.relevance_config
-            ):
-                continue
-            pairs.append((job, profile))
-    return pairs
-
-
 @app.get("/")
 def queue_list(
     request: Request,
     ctx: orchestrate.QueueContext = Depends(get_ctx),  # noqa: B008
 ):
     entries = orchestrate.list_queue(ctx.conn)
-    new_pairs = _new_pairs(ctx)
+    # F1-followup: candidate pairs (B3 filters + C4 relevance floor,
+    # no job_resume_variant yet) split into "processing" (an active
+    # variant_claims row -- pipeline/batch.py's prefetch stage or a
+    # concurrent web request is rendering it right now) and "queued"
+    # (a candidate, nothing working on it yet). list_candidate_pairs()
+    # is the same function pipeline/batch.py's own prefetch stage draws
+    # from -- one definition of "candidate," not two.
+    candidate_pairs = list_candidate_pairs(
+        ctx.conn, ctx.filter_config, ctx.relevance_config, _LIST_WINDOW_DAYS
+    )
+    claims = list_claims(ctx.conn)
+    processing_pairs = [
+        (job, profile)
+        for job, profile in candidate_pairs
+        if (job.id, profile) in claims
+    ]
+    queued_pairs = [
+        (job, profile)
+        for job, profile in candidate_pairs
+        if (job.id, profile) not in claims
+    ]
     applications = list_applications(ctx.conn)
     docx_urls = {
         a.application_id: _resume_static_url(a.docx_path) for a in applications
@@ -149,7 +126,8 @@ def queue_list(
         "queue_list.html",
         {
             "entries": entries,
-            "new_pairs": new_pairs,
+            "queued_pairs": queued_pairs,
+            "processing_pairs": processing_pairs,
             "applications": applications,
             "docx_urls": docx_urls,
         },
@@ -169,6 +147,17 @@ def queue_detail(
         raise HTTPException(status_code=404, detail="job not found") from None
     except orchestrate.NoBaseResumeError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from None
+    except orchestrate.AlreadyProcessingError:
+        # Someone else (the prefetch batch, or another request for this
+        # same pair) is already running the ladder -- do not run it
+        # again and race the insert. 202: request understood, not done
+        # yet, come back shortly.
+        return templates.TemplateResponse(
+            request,
+            "processing.html",
+            {"job_id": job_id, "profile": profile},
+            status_code=202,
+        )
 
     job = get_job_by_id(ctx.conn, job_id)
     analysis = get_job_analysis(ctx.conn, job_id, profile)

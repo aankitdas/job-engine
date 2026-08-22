@@ -13,6 +13,7 @@ pattern as test_extract.py/test_patch.py.
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -21,15 +22,19 @@ from jobengine.db.migrate import connect, init
 from jobengine.db.models import (
     BaseResume,
     Job,
+    JobAnalysis,
     JobResumeVariant,
     RubricResultRow,
+    claim_variant,
     get_job_analysis,
     get_job_resume_variant,
     get_rubric_results,
     insert_base_resume,
     insert_job_resume_variant,
     insert_rubric_results,
+    list_claims,
     upsert_job,
+    upsert_job_analysis,
 )
 from jobengine.llm.schemas import (
     ApiConfig,
@@ -479,3 +484,127 @@ def test_approve_raises_hard_rubric_failure_even_with_override(conn):
         "SELECT 1 FROM applications WHERE resume_variant_id = ?", (variant.id,)
     ).fetchone()
     assert application is None
+
+
+# --- F1-followup: the claim mechanism (db/models.py's variant_claims)
+# that closes the real "UNIQUE constraint failed: job_resume_variants.
+# job_id, profile" race -- two concurrent ensure_reviewed() calls for
+# the same pair must never both run the ladder or both attempt the
+# insert. See docs/decisions.md for the full write-up.
+
+
+def _seed_job_analysis(conn, job_id, profile="software_engineer") -> None:
+    """Pre-seeds job_analysis so ensure_reviewed()'s own extraction step
+    is a no-op, isolating these tests' assertions to the claim-guarded
+    ladder step specifically (not conflating "no new extraction call"
+    with "no new ladder call")."""
+    upsert_job_analysis(
+        conn,
+        JobAnalysis(
+            job_id=job_id,
+            profile=profile,
+            required_keywords='["Go", "Rust"]',
+            preferred_keywords="[]",
+            tech_stack='["Go", "Rust"]',
+            jd_quality="good",
+            keyword_hash="deadbeef",
+            analyzed_at="2026-08-20T00:00:00+00:00",
+            model="qwen3.5:9b-q4_K_M",
+            cost_usd=0.0,
+        ),
+    )
+    conn.commit()
+
+
+def test_ensure_reviewed_raises_already_processing_when_claim_is_held(conn):
+    job_id = _seed_job(conn)
+    _seed_base_resume(conn)
+    _seed_job_analysis(conn, job_id)
+    # Freshly claimed relative to real wall-clock time, so it reads as
+    # "not stale" against ensure_reviewed()'s own real-time cutoff below.
+    real_now = datetime.now(UTC).isoformat()
+    claim_variant(conn, job_id, "software_engineer", "web", real_now, real_now)
+    client = _FakeClient(_EXTRACT_PAYLOAD)
+
+    with pytest.raises(orchestrate.AlreadyProcessingError):
+        orchestrate.ensure_reviewed(_ctx(conn, client), job_id, "software_engineer")
+
+    assert client.calls == []  # the ladder never ran a second time
+    assert get_job_resume_variant(conn, job_id, "software_engineer") is None
+
+
+def test_ensure_reviewed_reclaims_a_stale_claim_and_completes(conn):
+    """A claim whose owning process died mid-ladder (crash, Ctrl+C, a
+    reload) must self-heal, not permanently block the pair. Seeds a
+    claim old enough to be past orchestrate.STALE_CLAIM_SECONDS."""
+    job_id = _seed_job(conn)
+    _seed_base_resume(conn)
+    _seed_job_analysis(conn, job_id)
+    stale_claimed_at = (
+        datetime.now(UTC) - timedelta(seconds=orchestrate.STALE_CLAIM_SECONDS + 60)
+    ).isoformat()
+    conn.execute(
+        "INSERT INTO variant_claims (job_id, profile, claimed_by, claimed_at) "
+        "VALUES (?, ?, 'web', ?)",
+        (job_id, "software_engineer", stale_claimed_at),
+    )
+    conn.commit()
+    client = _FakeClient(_EXTRACT_PAYLOAD)
+
+    variant = orchestrate.ensure_reviewed(
+        _ctx(conn, client), job_id, "software_engineer"
+    )
+
+    assert variant.job_id == job_id
+    assert client.calls  # the ladder really ran, reclaim succeeded
+
+
+def test_ensure_reviewed_releases_claim_after_success(conn):
+    job_id = _seed_job(conn)
+    _seed_base_resume(conn)
+    client = _FakeClient(_EXTRACT_PAYLOAD)
+
+    orchestrate.ensure_reviewed(_ctx(conn, client), job_id, "software_engineer")
+
+    assert list_claims(conn) == set()
+
+
+def test_ensure_reviewed_releases_claim_even_when_the_ladder_raises(conn, monkeypatch):
+    """The finally-block guarantee: a claim must not survive an
+    exception raised mid-ladder, or the pair would be stuck "processing"
+    until STALE_CLAIM_SECONDS elapses instead of being immediately
+    retriable."""
+    job_id = _seed_job(conn)
+    _seed_base_resume(conn)
+    _seed_job_analysis(conn, job_id)
+
+    def _boom(**kwargs):
+        raise RuntimeError("simulated ladder failure")
+
+    monkeypatch.setattr(orchestrate.patch, "run_ladder", _boom)
+    client = _FakeClient(_EXTRACT_PAYLOAD)
+
+    with pytest.raises(RuntimeError, match="simulated ladder failure"):
+        orchestrate.ensure_reviewed(_ctx(conn, client), job_id, "software_engineer")
+
+    assert list_claims(conn) == set()
+    assert get_job_resume_variant(conn, job_id, "software_engineer") is None
+
+
+def test_ensure_reviewed_claimed_by_defaults_to_web(conn, monkeypatch):
+    job_id = _seed_job(conn)
+    _seed_base_resume(conn)
+    _seed_job_analysis(conn, job_id)
+    seen_claimed_by = []
+    real_claim_variant = orchestrate.claim_variant
+
+    def _spy(conn_, job_id_, profile_, claimed_by, *args):
+        seen_claimed_by.append(claimed_by)
+        return real_claim_variant(conn_, job_id_, profile_, claimed_by, *args)
+
+    monkeypatch.setattr(orchestrate, "claim_variant", _spy)
+    client = _FakeClient(_EXTRACT_PAYLOAD)
+
+    orchestrate.ensure_reviewed(_ctx(conn, client), job_id, "software_engineer")
+
+    assert seen_claimed_by == ["web"]

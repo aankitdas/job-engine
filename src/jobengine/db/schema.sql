@@ -110,6 +110,29 @@ CREATE TABLE IF NOT EXISTS job_resume_variants (
     created_at          TEXT NOT NULL
 );
 
+-- F1-followup: an in-progress claim on a (job_id, profile) pair being
+-- rendered by ensure_reviewed() (queue/orchestrate.py), whether triggered
+-- by a human's on-demand click (web) or the scheduled prefetch stage
+-- (pipeline/batch.py). The PRIMARY KEY is the mutex itself -- whichever
+-- caller's INSERT lands first wins, so two concurrent callers for the
+-- same pair never both run the ladder (the LLM call, docx render, and
+-- PDF conversion) or both attempt the job_resume_variants insert that
+-- used to crash with "UNIQUE constraint failed: job_resume_variants.
+-- job_id, profile". Purely ephemeral scheduling state, not accumulating
+-- history like the rest of this schema (hard rule 13 does not apply):
+-- a row here only ever means "still rendering," never a fact worth
+-- keeping once that's done. claimed_at backs a staleness-based reclaim
+-- (queue/orchestrate.py's STALE_CLAIM_SECONDS) so a claim whose owning
+-- process died mid-ladder (crash, Ctrl+C, a reload) self-heals on the
+-- next attempt at that pair instead of leaving it "processing" forever.
+CREATE TABLE IF NOT EXISTS variant_claims (
+    job_id      INTEGER NOT NULL REFERENCES jobs (id),
+    profile     TEXT NOT NULL,
+    claimed_by  TEXT NOT NULL,
+    claimed_at  TEXT NOT NULL,
+    PRIMARY KEY (job_id, profile)
+);
+
 CREATE TABLE IF NOT EXISTS rubric_results (
     id                      INTEGER PRIMARY KEY,
     job_resume_variant_id   INTEGER NOT NULL REFERENCES job_resume_variants (id),

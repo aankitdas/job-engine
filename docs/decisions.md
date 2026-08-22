@@ -2817,3 +2817,177 @@ render, not a hypothetical one. Full suite: 511 collected, 506 passing
 confirmed via `git stash` before writing this up, unrelated to any file
 this session touched. `ruff check`/`format --check` clean on every file
 this session touched.
+
+**D49. F1-followup: "Score and review" blocking on the full patch ladder
+(LLM call, docx render, LibreOffice PDF conversion) inside a FastAPI
+request, and the real "UNIQUE constraint failed: job_resume_variants.
+job_id, profile" crash that request shape produces under a double
+request. Closed via a claim-based mutex (`variant_claims`, new table)
+plus extending `pipeline/batch.py` to prefetch every candidate pair's
+ladder ahead of a human's click.**
+
+Diagnosed first, before any design: `ensure_reviewed()`
+(`queue/orchestrate.py`) was check-then-insert with the entire ladder in
+between, and `web/app.py` builds exactly one `sqlite3.Connection` per
+process (`check_same_thread=False`, `app.py`'s own documented reason:
+FastAPI runs sync routes in a threadpool). Two concurrent requests for
+the same `(job_id, profile)` -- a double-click, a reload mid-render, two
+tabs -- both saw `existing is None`, both ran the ladder a second time
+for nothing (including writing to the *same* output docx/pdf paths, a
+silent corruption risk worse than the DB error), then raced the insert;
+the loser hit the exact reported UNIQUE constraint failure, unhandled,
+surfacing as a 500.
+
+Two shapes were put to the user, with a recommendation and reasons, not
+a default:
+
+1. **(a) Background workers inside the web app** -- rejected. The dev
+   workflow runs this app as `uv run uvicorn --reload`, which kills
+   in-flight background work and any in-memory status on every reload
+   during active development -- directly undermining "ready when I get
+   to them," the exact case being fixed. It also duplicates scheduling
+   logic (`pipeline/batch.py` already knows "which jobs are new, which
+   pairs clear the floor") and introduces a second concurrent writer to
+   the same connection needing its own locking story, on top of, not
+   instead of, the request-thread race above.
+2. **(b) Extend `pipeline/batch.py`'s existing incremental orchestrator,
+   web app reads only** -- chosen. `batch.py` already exists for exactly
+   this purpose (D38: "run on a schedule instead of never as a batch"),
+   is already live on Task Scheduler, and is already incremental by
+   construction. Adding a third stage (render the ladder for
+   floor-clearing pairs) is the established pattern, not a new one. The
+   local model call (P3) is Ollama, zero-cost per hard rule 9, so
+   running it for every floor-clearing pair rather than only the ones
+   clicked is not a paid-API concern -- flagged instead as a wall-clock
+   cost (below).
+
+Shape (b) means per-pair status (queued/processing/ready) has to live in
+the db, not web-process memory, since the render can now happen in a
+different process than the page load showing it. Three states:
+`ready` (a `job_resume_variants` row exists, unchanged), `queued` (the
+same candidate check `web/app.py`'s old `_new_pairs()` computed, now
+`pipeline/batch.py`'s `list_candidate_pairs()` -- moved there and
+reused by both the list page and the new render stage, one definition
+of "candidate," matching `WINDOW_DAYS`' own single-source-of-truth
+precedent, D38), and `processing` (an active `variant_claims` row).
+
+**The race fix and the status mechanism are the same table.**
+`variant_claims (job_id, profile, claimed_by, claimed_at)`,
+`PRIMARY KEY (job_id, profile)`: `ensure_reviewed()` claims a pair
+(`db/models.py`'s `claim_variant()`) before running the ladder --  the
+`PRIMARY KEY` is the mutex itself, whichever caller's `INSERT` lands
+first wins, a second caller gets `AlreadyProcessingError` immediately,
+before doing any of the expensive work, never a second ladder run or a
+second insert attempt. Re-checks for an existing variant a second time
+immediately after winning the claim (closes a real, separate gap: the
+caller that held the claim before you may have finished, inserted the
+row, and released the claim in between your first check and winning the
+claim yourself -- without this re-check you'd still run the whole ladder
+for nothing and hit the same UNIQUE constraint on the insert below). The
+claim is always released in a `finally`, success or failure, so an
+exception mid-ladder never leaves a pair permanently claimed.
+
+**Orphaned claims, addressed explicitly, not left to `finally` always
+firing (the user's own framing, asked before any code):** a
+`claimed_at`-based staleness threshold, `STALE_CLAIM_SECONDS = 600`
+(`queue/orchestrate.py`), not a startup sweep. `claim_variant()`'s
+fallback path (`INSERT` fails because something already holds the
+pair) only succeeds if that existing claim's `claimed_at` is older than
+the caller's own `stale_cutoff`; the `UPDATE ... WHERE claimed_at < ?`
+form makes the reclaim itself atomic under SQLite's serialized writer
+(a second concurrent reclaim attempt's `WHERE` no longer matches once
+the first has bumped `claimed_at`). This self-heals on the very next
+attempt at that pair -- no separate sweep process, no dependency on
+which side crashed or whether `finally` ran. 600s was chosen against
+every real measurement available, not a round-number guess: the local
+model's real full-prompt latency is ~5.1s/call (D38, the closest real
+analog to P3's rephrase call), a real PDF conversion measured live this
+session at ~0.8s (`resume/pdf.py`'s `render_pdf()` timed 3x against a
+real base resume docx, not estimated), and `pdf.py`'s own subprocess
+call is hard-capped at 60s regardless. 600s is wide headroom above any
+realistic ladder run (including a cold Ollama start, ~15-22s per
+C1/D35) while still self-healing well within one scheduled batch window,
+not hours later.
+
+**Cost of the new, uncapped render stage, projected against real
+numbers, not assumed, before scheduling anything unattended (same bar
+D38 set for itself):** a real, read-only query against
+`data/jobengine.db` (via `web/app.py`'s own `_new_pairs()` logic,
+before it moved) found 41 real candidate pairs in the current backlog
+(33 `software_engineer`, 6 `data_scientist`, 2 `ai_ml_engineer`), out of
+478 open jobs in the 7-day window; since that backlog accumulated across
+the full window, ~41/7 ~= 6 new candidate pairs/day is the projected
+steady-state inflow. Per-pair cost: extraction is already done for
+these jobs by batch's own earlier stage (job_analysis exists before the
+render stage runs, so `ensure_reviewed()`'s own extraction check is a
+no-op), so the added cost per pair is P0-P2 (deterministic, no model
+call) plus up to 2 P3 rephrase calls (real evidence this is the common
+case, not the exception: D42 found 66 of 67 real pairs fail R001 pre-
+patch, 98.5%) at ~5.1s each, plus one PDF conversion at ~0.8s -- roughly
+11s/pair realistic case. Projected: **first run after this ships, ~7-8
+minutes added (clearing the 41-pair backlog) on top of whatever
+relevance/extraction costs that run already pays; steady-state, ~1-2
+minutes/day added** on top of D38's own ~3 min/day figure. Confirmed
+uncapped is still the right call (matches `daily_cap: null`'s existing
+philosophy, D23, and this runs unattended overnight where wall-clock
+time doesn't block the user) via `AskUserQuestion`, alongside two other
+confirmed calls: the on-demand detail route returns a 202 wait/retry
+page rather than blocking the request thread when it hits a claimed
+pair (simpler, never ties up a thread for the ladder's duration), and
+`claimed_by` ('web' vs 'batch') stays a debug-only column, not surfaced
+in the UI (matches D48's own "no speculative UI" precedent).
+
+**Implementation:** `db/schema.sql` gains `variant_claims`
+(`_SCHEMA_VERSION` bumped to `"0003_variant_claims"` in `migrate.py`,
+purely additive -- `init()`'s `executescript` picks it up via
+`CREATE TABLE IF NOT EXISTS`, no rebuild needed, unlike the
+`job_resume_variants` migration F1 needed). `db/models.py` gains
+`claim_variant()`/`release_claim()`/`list_claims()` (the claim
+mechanics, each commits immediately -- unlike this module's usual
+caller-commits convention -- because the claim only works as a
+cross-process mutex if a claim made on one connection is visible to a
+different connection's next attempt right away) and
+`list_recent_open_jobs()` (the cutoff query moved out of `web/app.py`'s
+old `_recent_open_jobs()`, now `datetime('now', ?)`-based to match
+`list_unscored_open_jobs()`'s own existing style instead of Python-side
+arithmetic). `queue/orchestrate.py`'s `ensure_reviewed()` gains a
+`claimed_by: str = "web"` keyword-only param and the claim/re-check/
+release logic described above; new `AlreadyProcessingError`.
+`pipeline/batch.py` gains `list_candidate_pairs()` (the moved
+`_new_pairs()` logic, shared) and a fourth stage in `run_daily_batch()`
+that calls `ensure_reviewed(..., claimed_by="batch")` for every
+candidate pair, skipping (not failing the run) on `NoBaseResumeError` or
+`AlreadyProcessingError`; `BatchResult` gains `variants_rendered`.
+`web/app.py`'s `queue_list()` splits candidates into `queued_pairs`/
+`processing_pairs` via `list_claims()`; `queue_detail()` catches
+`AlreadyProcessingError` and returns a new `processing.html` template at
+202 instead of running the ladder. `queue_list.html` gains a Status
+column (Queued/Processing) in the "not yet reviewed" table.
+
+23 new tests, tests-first per hard rule 7: `test_db.py` +8 (claim/
+reclaim/release round trips, `list_recent_open_jobs()`'s window
+inclusion/exclusion/closed-job cases), `test_queue_orchestrate.py` +5
+(`AlreadyProcessingError` raised with zero new ladder calls when a
+fresh claim is held, a stale claim is reclaimed and the ladder
+completes, the claim is released after both success and a simulated
+mid-ladder exception, `claimed_by` defaults to `"web"`),
+`test_batch.py` +5 (`list_candidate_pairs()` includes a floor-clearing
+pair / excludes one below the floor, the render stage renders a
+variant / skips a pair with no `base_resumes` row / skips a pair
+already claimed), `test_web_app.py` +3 (the list page's real "Queued"/
+"Processing" text, the detail route's 202 with zero new ladder calls
+when claimed). Migration verified against a scratch db (never the real
+one, per hard rule 13): idempotent across two `migrate()` calls,
+`variant_claims` present afterward. Full suite: 532 collected, 527
+passing -- the same 5 pre-existing `test_batch.py` failures already
+documented (a stale relative-date fixture, unrelated), confirmed
+unchanged by this session's work. `ruff check`/`format --check` clean
+on every file this session touched.
+
+**Not yet done, flagged rather than silently assumed:** the real
+`data/jobengine.db` is still on schema version `0002` as of this
+checkpoint -- `migrate()` was run only against scratch copies this
+session, per hard rule 13, never against the real path. The code as
+shipped will raise (no `variant_claims` table) if run against the real
+db before `uv run python -m jobengine.db migrate` is run there with
+explicit confirmation. See PROGRESS.md's Known Issues.

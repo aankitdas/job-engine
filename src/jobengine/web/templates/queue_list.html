@@ -35,14 +35,24 @@
   {% endif %}
 
   <h2>Not yet reviewed</h2>
-  {% if new_pairs %}
+  {% if processing_pairs or queued_pairs %}
   <table>
-    <tr><th>Job</th><th>Company</th><th>Profile</th><th></th></tr>
-    {% for job, profile in new_pairs %}
+    <tr><th>Job</th><th>Company</th><th>Profile</th><th>Status</th><th></th></tr>
+    {% for job, profile in processing_pairs %}
     <tr class="new">
       <td>{{ job.title }}</td>
       <td>{{ job.company_slug }}</td>
       <td>{{ profile }}</td>
+      <td>Processing</td>
+      <td><a href="/jobs/{{ job.id }}/{{ profile }}">Check</a></td>
+    </tr>
+    {% endfor %}
+    {% for job, profile in queued_pairs %}
+    <tr class="new">
+      <td>{{ job.title }}</td>
+      <td>{{ job.company_slug }}</td>
+      <td>{{ profile }}</td>
+      <td>Queued</td>
       <td><a href="/jobs/{{ job.id }}/{{ profile }}">Score and review</a></td>
     </tr>
     {% endfor %}

@@ -3,60 +3,90 @@
 **Claude Code: read this file at the start of every session and update it at
 the end via `/checkpoint`. Do not rely on memory of previous sessions.**
 
-Last updated: 2026-08-20
-Current task: **D48: `GET /` gains a third section, "Approved," closing
-the dead end where an approved job had no list view of its own -- the
-only way to see what you'd applied to was a direct SQL query against
-`data/jobengine.db`.**
+Last updated: 2026-08-22
+Current task: **none chosen yet -- needs your go-ahead.** This
+session's work (D49, an F1-followup) was user-directed, not a fresh
+TODO.md queue item; TODO.md's own queue is unchanged since D48.
+Candidates for next: the open items list below (carried forward from
+D48, unchanged by this session except where noted), or a TODO.md item
+(B1-followup, B3-followup, F2, F3, G2).
 
-**Three decisions made explicit before writing any code, all confirmed
-by you:** (1) sourced from `applications` (joined to `jobs` and
-`job_resume_variants`), not `job_resume_variants.review_status =
-'approved'` -- `applications` is the table `pipeline/filter.py`'s
-`is_already_applied()` already treats as authoritative for "applied,"
-and it carries submission-specific fields (`status`, later
-`submitted_at`/`autonomy_level`) `job_resume_variants` doesn't; (2) not
-scoped by `_LIST_WINDOW_DAYS` (the 7-day lookback the other two
-sections use) -- an approved-but-unsubmitted job must never silently
-age out, that's the exact bug this section exists to fix, so
-`list_applications()` takes no date argument at all; (3)
-`applications.status` rendered as plain text, no badge/filter -- every
-row is `'queued'` today, nothing writes any other value yet, a filter
-over a single-valued column would be speculative UI for outcome
-tracking that doesn't exist. Full reasoning: D48, docs/decisions.md.
+**D49 (this session, F1-followup): "Score and review" blocked on
+the full patch ladder inside a FastAPI request (LLM call, docx render,
+LibreOffice PDF conversion), and had a real check-then-insert race --
+"UNIQUE constraint failed: job_resume_variants.job_id, profile" -- that
+a double request (reload mid-render, two tabs) made routine, not rare.
+Both diagnosed and fixed, plus a real prefetch stage added so most
+pairs are already rendered by the time you get to them.**
 
-**Built:** `db/models.py` gains `ApplicationEntry` +
-`list_applications()` (the join above, `ORDER BY a.id DESC`, no
-`WHERE`); `web/app.py`'s `queue_list()` calls it and precomputes each
-row's `.docx` URL via the existing `_resume_static_url()`;
-`queue_list.html` gains the "Approved" table -- title, company,
-profile, apply link, `.docx` download link (added after your review of
-the first draft: the section's purpose is "approved, still need to
-submit," and the résumé file is half of what that takes, not just the
-apply URL), status text, and a link back to the existing detail page.
-7 new tests, tests-first per hard rule 7 (`test_db.py` +3,
-`test_web_app.py` +4). Full suite 511 collected, 506 passed; the other
-5 (`test_batch.py`, a stale relative-date fixture unrelated to this
-work) fail identically on `main` before this session's changes,
-confirmed via `git stash`, not caused by D48. `ruff check`/`format`
-clean on every file this session touched.
+Race diagnosed first (confirmed, not assumed): `ensure_reviewed()`
+checked for an existing variant, ran the whole ladder, then inserted --
+two concurrent callers for the same pair both passed the check, both
+ran the ladder a second time (including writing to the *same* output
+docx/pdf paths, a silent corruption risk worse than the DB crash), then
+raced the insert. Fixed via a new `variant_claims` table
+(`(job_id, profile)` primary key = the mutex itself) that
+`ensure_reviewed()` claims before rendering and always releases in a
+`finally`; a second caller for a claimed pair gets a clean
+`AlreadyProcessingError` instead of re-running anything. A
+`claimed_at`-based staleness threshold (`STALE_CLAIM_SECONDS = 600` in
+`queue/orchestrate.py`, reasoned against real measured latencies, not a
+round-number guess) self-heals a claim whose owner crashed mid-ladder,
+without a separate sweep process.
 
-Next: no next task chosen yet, needs your go-ahead. Same open items as
-before (R012/R013 text still needed for `RULE_INFO`, reviewing the
-live `(4630, ai_ml_engineer)` pairing, the queue-list multi-profile
-gap, G2, the Ashby-ceiling gap, `autonomy_level` wiring, the
-approve()-called-twice guard [note: if that guard is ever missing and
-`approve()` fires twice for one variant, D48's new section would
-render both `applications` rows for the same job -- a real, if
-currently unreachable, consequence worth remembering if that bug is
-ever hit for real], `base_resumes` regeneration [doubly stale --
-identity text and bank tags both], a real staleness-hash mechanism, a
-gap_ledger query surface, B3-followup/F2/F3, and the
-`data_scientist`/`b_bantrly_01`/SQL profile-tagging call from D47).
-D40-D47 all committed (`8cccb16`, `6ef7eb1`, `72974fe`, `36faa77`,
-`6e59e4e`); **this session's D48 changes (5 files: `db/models.py`,
-`web/app.py`, `queue_list.html`, `test_db.py`, `test_web_app.py`) are
-uncommitted** -- you're handling git yourself this session.
+Two prefetch shapes were put to you with a recommendation, not a
+default: (a) background workers inside the web app, rejected (the dev
+`--reload` workflow kills in-flight background work and its in-memory
+status on every reload -- undermines the exact thing being fixed); (b)
+extend `pipeline/batch.py`'s existing scheduled orchestrator, chosen
+(already exists for exactly this purpose, D38; already incremental;
+the local model call is zero-cost per hard rule 9). `pipeline/batch.py`
+gained a fourth stage that prefetches every candidate pair's ladder,
+`claimed_by="batch"`, sharing `ensure_reviewed()` with the web app's
+on-demand fallback rather than a second copy of the logic. Status shape
+follows from shape (b): `GET /`'s "not yet reviewed" table now shows
+Queued vs Processing per pair, read from `variant_claims`/
+`job_resume_variants`, not process memory (has to be, since the render
+can now happen in a different process than the page load showing it).
+Real cost projected before shipping, same bar D38 set for itself: 41
+real candidate pairs in the current backlog (read-only query against
+`data/jobengine.db`), ~6/day steady-state inflow; real per-call LLM
+latency ~5.1s (D38), a real PDF conversion timed live this session at
+~0.8s. Projected ~7-8 min added to the first run after this ships,
+~1-2 min/day steady-state after that. Full reasoning, including the
+three explicit `AskUserQuestion` confirmations (202 wait/retry page
+over blocking, uncapped render stage, `claimed_by` debug-only): D49,
+docs/decisions.md.
+
+23 new tests, tests-first per hard rule 7 (`test_db.py` +8,
+`test_queue_orchestrate.py` +5, `test_batch.py` +5, `test_web_app.py`
++3). Full suite 532 collected, 527 passed; the same 5 pre-existing
+`test_batch.py` failures already documented below (stale relative-date
+fixture, unrelated) confirmed unchanged. `ruff check`/`format` clean on
+every file touched.
+
+**Not yet done, blocking before this runs for real: the real
+`data/jobengine.db` is still on schema version `0002`.** This session's
+`migrate()` calls were against scratch copies only, per hard rule 13 --
+never against the real path, no confirmation was asked for it. The code
+as shipped will raise (no `variant_claims` table) if the real app runs
+against the real db before `uv run python -m jobengine.db migrate` runs
+there, with your explicit confirmation. See Known Issues.
+
+Next: same open items as before D48 (R012/R013 text still needed for
+`RULE_INFO`, reviewing the live `(4630, ai_ml_engineer)` pairing, the
+queue-list multi-profile gap, G2, the Ashby-ceiling gap,
+`autonomy_level` wiring, the approve()-called-twice guard, `base_resumes`
+regeneration [doubly stale -- identity text and bank tags both], a real
+staleness-hash mechanism, a gap_ledger query surface, B3-followup/F2/F3,
+and the `data_scientist`/`b_bantrly_01`/SQL profile-tagging call from
+D47), plus this session's own: run the real migration (with your
+confirmation), then do a real live run of `pipeline/batch.py` against
+the real db before trusting it unattended on Task Scheduler (same
+precedent D38 set for itself), and watch whether the projected ~7-8
+minute first-run cost holds. D40-D48 all committed (`8e4c8e0` and
+earlier); **this session's D49 changes are uncommitted** -- you're
+handling git yourself this session.
 
 Separately: **B2's Task Scheduler regression is now confirmed fixed, not
 just a positive sign.** Last checkpoint had one real unattended firing
@@ -106,7 +136,7 @@ project's own B1/B2 sessions) treated that file.
 | D4 | Patch P3 | done | `patch.py` gains rephrase+writeback; real deficit closed live (CMB, coverage 0.0->1.0), real bug found+fixed via that run; persist/reload/reuse chain re-verified live with full captured evidence 2026-08-05, see D30 + its second addendum |
 | E1 | Profile config + brief | done | `jobengine.profiles` package: registry (`config/profiles.yaml`) + `profiles brief` CLI; live-verified against real db/bank for all 3 profiles; see D31 |
 | E2 | Base resumes | done | all 3 profiles persisted (`resume/base/{ai_ml_engineer,software_engineer,data_scientist}/v1/`, `ai_ml_engineer` also has v2; `base_resumes` ids 1-4), each `passed: true, hard_failures: []`, `coverage: 1.0`; R002 demoted to scored-only (D33), coverage measured against bank-frequency fallback not real corpus (D34, revisit later) |
-| F1 | Review queue | done | `queue/orchestrate.py` + `web/app.py`, patch-ladder rendering stays lazy per-job trigger (unchanged); C4/C3 (relevance/extraction) now have a real daily batch orchestrator (`pipeline/batch.py`, D38), closing D35's deliberately-deferred gap now that C4 exists; `.docx` download link added to `queue_detail.html`; verified end to end against the real app/db with real job 3871 and, this session, a real 13m28s live catch-up run (D38); `GET /` gained a third "Approved" section sourced from `applications` (D48); see D35, D37, D38, D48 |
+| F1 | Review queue | done | `queue/orchestrate.py` + `web/app.py`, patch-ladder rendering no longer only a lazy per-job trigger -- `pipeline/batch.py`'s daily orchestrator now prefetches every candidate pair's ladder ahead of a click too (D49), sharing `ensure_reviewed()` with the on-demand fallback; a real check-then-insert race in `ensure_reviewed()` closed via a `variant_claims` claim table (D49); C4/C3 (relevance/extraction) has the real daily batch orchestrator (`pipeline/batch.py`, D38); `.docx` download link added to `queue_detail.html`; verified end to end against the real app/db with real job 3871 and a real 13m28s live catch-up run (D38); `GET /` gained a third "Approved" section sourced from `applications` (D48); **not yet verified live against the real db -- migration not yet run there, see Known Issues**; see D35, D37, D38, D48, D49 |
 | F2 | Dashboard | not started | |
 | F3 | Telegram | not started | |
 | G1 | Autonomy gating | done | `apply/form_schema.py` + `config/apply.yaml`, Greenhouse-only (Ashby has no public form-schema endpoint, real 401 confirmed, D39); fetch+classify only, no filling/submitting (G2+); `classify_autonomy_ceiling()`'s rule inverted after a real 40-job live run found the first pass too permissive, see D39 |
@@ -131,13 +161,18 @@ below and docs/decisions.md; this section is current state only.
 immutability triggers; F1 this session: `job_resume_variants` gained
 `review_status`/`reviewed_at` columns and lost its old table-level
 `UNIQUE(base_resume_id, selection_hash)` constraint, replaced by
-`idx_job_resume_variants_job_profile` on `(job_id, profile)`, see D35),
+`idx_job_resume_variants_job_profile` on `(job_id, profile)`, see D35;
+new this checkpoint, D49: `variant_claims` table, `PRIMARY KEY (job_id,
+profile)`, the cross-process render mutex/status marker -- purely
+ephemeral scheduling state, hard rule 13 does not apply to it),
 `migrate.py` (`connect()` gained a `check_same_thread` parameter, `True`
 everywhere except `jobengine.web.app`; `migrate()` gained
 `_rebuild_job_resume_variants_if_needed()`, a real table-rebuild
 migration, the first beyond idempotent `CREATE ... IF NOT EXISTS`;
-`_SCHEMA_VERSION` now `"0002_job_resume_variants_review_state"`, applied
-to the real db this session), `models.py` (pydantic models + typed
+`_SCHEMA_VERSION` now `"0003_variant_claims"` (D49, purely additive, no
+rebuild needed) -- **not yet applied to the real db as of this
+checkpoint, only to scratch copies, see Known Issues**), `models.py`
+(pydantic models + typed
 accessors for `companies`, `jobs`, `outcomes`, `runs`, `job_analysis`,
 `keyword_corpus`, `model_evals`, `base_resumes`; new this session, F1:
 `JobResumeVariant`, `RubricResultRow`, `Application`, `QueueEntry`
@@ -159,15 +194,20 @@ design -- see D43); new this session, C4: `RelevanceScore`/
 `RankableScore` models +
 `upsert_relevance_score()`, `get_relevance_score()`,
 `list_relevance_scores_for_cutoff()` (joins `jobs` for the
-`first_seen_at` tiebreak), `update_relevance_selection()`),
+`first_seen_at` tiebreak), `update_relevance_selection()`; new this
+checkpoint, D49: `claim_variant()`/`release_claim()`/`list_claims()`
+(the `variant_claims` mechanics -- unlike this module's usual
+caller-commits convention, these commit immediately, since the claim
+only works as a cross-process mutex if visible to a different
+connection's next attempt right away) and `list_recent_open_jobs()`
+(the cutoff query moved out of `web/app.py`'s old `_recent_open_jobs()`
+for reuse by `pipeline/batch.py`, now `datetime('now', ?)`-based to
+match `list_unscored_open_jobs()`'s own style)),
 `__main__.py` (`uv run python -m jobengine.db {init,migrate,stats}`).
-Tests: `test_db.py` 45 (up from 42, +3 this checkpoint for
-`list_applications()` -- empty case, joined-row round trip, and the
-no-date-window case, D48); (prior checkpoint's own delta: +1 net for
-`insert_gap_ledger_entries()`/`GapLedgerRow` -- D43 added 1 new test
-here, the round-trip case; the idempotency/no-missing-keywords cases
-live in `test_queue_orchestrate.py` instead since they need
-`ensure_reviewed()`), `test_db_migrate.py`
+Tests: `test_db.py` 53 (up from 45, +8 this checkpoint for D49's claim/
+reclaim/release round trips and `list_recent_open_jobs()`'s window
+inclusion/exclusion/closed-job cases); (prior checkpoint's own delta: +3
+for `list_applications()`, D48), `test_db_migrate.py`
 9.
 
 **resume/** (`src/jobengine/resume/`): `bank.py` (pydantic bank schema,
@@ -295,13 +335,26 @@ the model's own `relevance` number on real production jobs.
 `RelevanceConfig` gained `min_relevance_score: int = 0`. `config/
 relevance.yaml` (`disqualifier_blocklist`, `freshness_window_days: null`,
 new this session: `min_relevance_score: 20`, a conservative starting
-floor, not a calibrated number). New this checkpoint: `batch.py`
+floor, not a calibrated number). `batch.py`
 (`run_daily_batch()`, D38) — the daily C4/C3 orchestrator, `WINDOW_DAYS`
 (imported by `web/app.py` as `_LIST_WINDOW_DAYS`, single source of
-truth for both), CLI (`python -m jobengine.pipeline.batch`). Tests:
-`test_filter.py` 58 (up from 47: +5 leadership-role tests 2026-08-12,
+truth for both), CLI (`python -m jobengine.pipeline.batch`); new this
+checkpoint, D49: `list_candidate_pairs()` (moved out of `web/app.py`'s
+old `_new_pairs()`, now the one shared definition of "candidate" --
+B3 filters + C4 relevance floor + no `job_resume_variant` yet -- used
+by both this module's own new fourth stage and `web/app.py`'s list
+page), `run_daily_batch()` gained that fourth stage (calls
+`queue.orchestrate.ensure_reviewed(..., claimed_by="batch")` for every
+candidate pair, skipping rather than failing the run on
+`NoBaseResumeError`/`AlreadyProcessingError`), `BatchResult` gained
+`variants_rendered`, `_main()` now also loads and passes `identity`.
+Tests: `test_filter.py` 58 (up from 47: +5 leadership-role tests 2026-08-12,
 +7/-1 D40 seniority tests 2026-08-17), `test_extract.py` 14,
-`test_relevance.py` 36, `test_batch.py` 12.
+`test_relevance.py` 36, `test_batch.py` 17 (up from 12, +5 this
+checkpoint for D49: `list_candidate_pairs()` includes a floor-clearing
+pair / excludes one below the floor, the render stage renders a
+variant for a real candidate / skips a pair with no `base_resumes` row
+/ skips a pair already claimed).
 
 **llm/** (`src/jobengine/llm/`): `schemas.py`, `providers/local.py`
 (`LocalProvider`, `think=False` pinned on every call), `providers/
@@ -390,10 +443,27 @@ session (C4 follow-up, D37)): `orchestrate.py` — `QueueContext`
 (defaults to `RelevanceConfig()`, i.e. no floor, so existing callers
 that don't set it are unaffected), `local_client`, built once per
 process); `ensure_reviewed(ctx, job_id,
-profile)` (the lazy-trigger entry point: ensures `job_analysis` exists
+profile, *, claimed_by="web")` (the entry point, now called from two
+places, not one: a human's on-demand click, and, new this checkpoint
+(D49), `pipeline/batch.py`'s prefetch stage, `claimed_by="batch"`.
+Ensures `job_analysis` exists
 via C3's `analyze_job()`, then ensures a `job_resume_variant` exists via
 D3/D4's `run_ladder()`, idempotent, real deficits persisted to
-`rubric_results`; new this checkpoint, D43 (P4): also computes
+`rubric_results`; new this checkpoint, D49: claims the pair
+(`db/models.py`'s `claim_variant()`) before running the ladder,
+re-checks for an existing variant immediately after winning the claim
+(closes a real gap: the previous claim-holder may have finished and
+released in between the first check and winning the claim), always
+releases in a `finally`; raises the new `AlreadyProcessingError` if
+another caller already holds a non-stale claim, never blocks or
+retries silently. `STALE_CLAIM_SECONDS = 600` (module-level constant,
+reasoned against real measured latencies, see D49) governs when a claim
+is reclaimable -- self-heals a claim whose owner crashed mid-ladder,
+no separate sweep needed. This is the fix for a real, previously live
+bug: two concurrent calls for the same pair used to both run the whole
+ladder and race the `job_resume_variants` insert, one of them crashing
+with "UNIQUE constraint failed: job_resume_variants.job_id, profile";
+new this checkpoint, D43 (P4): also computes
 `measure.missing_keywords(result.bank, required)` after the ladder
 returns and, if non-empty, logs each to `gap_ledger` via the new
 `insert_gap_ledger_entries()` -- unconditional on `passed`/D42's soft-
@@ -408,15 +478,20 @@ overridable, or `UnacknowledgedSoftFailureError` for an R001-only
 failure unless the keyword-only `override_soft_failure=True` is
 passed, in which case the variant is also marked `accepted=True`);
 `list_queue()` (thin wrapper over `db/models.py`'s
-`list_pending_review_queue()`). No `__main__.py`: only the web routes
-and tests call this module. Tests: `test_queue_orchestrate.py`, 15
-tests (up from 11, +4 this checkpoint for D43's gap_ledger logging:
-logs both keywords for a real known-uncoverable pair, logs nothing when
-nothing's missing, a second call logs nothing further, `accepted`/
-`review_status` stay untouched), every one exercising the real
-bank/render/PDF/score pipeline (there is no lighter mock for
-`run_ladder()`, matching `test_patch.py`'s own precedent), LLM calls
-mocked via a stage-aware `_FakeClient` that inspects the requested
+`list_pending_review_queue()`). No `__main__.py`: the web routes and
+`pipeline/batch.py` (new this checkpoint) both call this module now,
+plus tests. Tests: `test_queue_orchestrate.py`, 20
+tests (up from 15, +5 this checkpoint for D49: `AlreadyProcessingError`
+raised with zero new ladder calls when a fresh claim is held, a stale
+claim is reclaimed and the ladder completes, the claim is released
+after both success and a simulated mid-ladder exception, `claimed_by`
+defaults to `"web"`); (prior checkpoint's own delta: +4 for D43's
+gap_ledger logging: logs both keywords for a real known-uncoverable
+pair, logs nothing when nothing's missing, a second call logs nothing
+further, `accepted`/`review_status` stay untouched), every one
+exercising the real bank/render/PDF/score pipeline (there is no lighter
+mock for `run_ladder()`, matching `test_patch.py`'s own precedent), LLM
+calls mocked via a stage-aware `_FakeClient` that inspects the requested
 schema's fields to serve both the extract and rephrase stages correctly
 from one fake.
 
@@ -424,31 +499,48 @@ from one fake.
 session (C4 follow-up, D37)): `app.py` —
 FastAPI app, `get_ctx()` (lazy singleton `QueueContext`, overridden in
 tests via `app.dependency_overrides`), `GET /` (pending queue +
-newly-B3-matched-but-never-triggered pairs from the last 7 days +, new
-this checkpoint (D48), every `applications` row via `db/models.py`'s
+candidate pairs (B3 filters + C4 relevance floor, no variant yet) from
+the last 7 days, now split into `processing_pairs`/`queued_pairs` via
+`db/models.py`'s new `list_claims()` (D49, this checkpoint -- replaces
+the old single `new_pairs` list; see below) +, D48, every `applications`
+row via `db/models.py`'s
 `list_applications()`, deliberately unscoped by the 7-day window --
 see Current task above), `GET
-/jobs/{job_id}/{profile}` (the lazy trigger; renders score/coverage/
+/jobs/{job_id}/{profile}` (the on-demand trigger; renders score/coverage/
 front_load/hard-failures/the real rendered PDF via a `/resume` static
-mount; new this checkpoint, D42: also computes `hard_block`/
+mount; new this checkpoint, D49: catches `orchestrate.AlreadyProcessingError`
+and returns the new `processing.html` template at 202 instead of
+running the ladder, when another caller -- `pipeline/batch.py`'s
+prefetch stage, or a second concurrent request -- already claimed this
+pair; D42: also computes `hard_block`/
 `needs_override` from the already-fetched `rubric_results` so the
 approve-gate state is visible the moment the page loads, not only after
 a failed approve attempt), `POST /jobs/{job_id}/{profile}/{approve,reject}`
-(new this checkpoint: `approve` gains a `override_soft_failure: bool =
+(`approve` gains a `override_soft_failure: bool =
 Form(False)` field, catches `orchestrate.HardRubricFailureError`/
 `UnacknowledgedSoftFailureError` as 409, a backstop since the template
 itself never normally offers a way to trigger either incorrectly).
-`_new_pairs()` also gates on `passes_relevance_floor()` (C4's
+`_new_pairs()` (the old candidate-selection function) moved out to
+`pipeline/batch.py`'s `list_candidate_pairs()` this checkpoint (D49) --
+now the one shared definition of "candidate," used by this route and by
+`pipeline/batch.py`'s own prefetch stage, rather than two
+independently-maintained copies (matches `WINDOW_DAYS`' own
+single-source-of-truth precedent, D38). Its behavior is unchanged: gates
+on `passes_relevance_floor()` (C4's
 `min_relevance_score`), after `passes_all_filters()`/`matches_profiles()`,
 per matched profile — a job can clear the floor for one profile and not
-another. Real production impact measured before shipping: 84 of 934
+another. Real production impact measured before shipping (D37): 84 of 934
 previously-queueable pairs now excluded (79 `software_engineer`, 3
 `data_scientist`, 2 `ai_ml_engineer`); spot-checking the lowest-scored
-ones is what surfaced the disqualifiers-leak bug (D37).
-`templates/queue_list.html`/`queue_detail.html` (plain server-rendered
+ones is what surfaced the disqualifiers-leak bug.
+`templates/queue_list.html`/`queue_detail.html`/`processing.html` (new
+this checkpoint, D49 -- the 202 wait/retry page `queue_detail()` returns
+for a claimed pair) (plain server-rendered
 HTML, no JS, per spec: reviewing means seeing the already-patched
 candidate and deciding, not editing bullet text in a browser;
-`queue_list.html` gained a third "Approved" table this checkpoint
+`queue_list.html`'s "Not yet reviewed" table gained a Status column
+this checkpoint (D49, Queued/Processing, sourced from `list_claims()`)
+and its third "Approved" table
 (D48) -- title/company/profile/apply link/`.docx` download link
 (`_resume_static_url()` reused a third time, precomputed per row in
 `queue_list()` into a `docx_urls` dict passed alongside `applications`
@@ -482,8 +574,12 @@ template context this checkpoint (D46) so "Hard failures" shows a
 human-readable name/explanation per rule alongside the existing terse
 `detail` text; `.rule-explanation` CSS added. `uv run uvicorn
 jobengine.web.app:app --reload` (CLAUDE.md's already-documented dev
-command). Tests: `test_web_app.py`, 25 tests (up from 21, +4 this
-checkpoint for D48: the Approved section shows an approved entry with
+command). Tests: `test_web_app.py`, 28 tests (up from 25, +3 this
+checkpoint for D49: the list page shows real "Queued"/"Processing" text
+for an unclaimed vs. claimed candidate, the detail route returns 202
+and makes zero new ladder calls when the pair is already claimed);
+(prior checkpoint's own delta: +4 for D48, the Approved section shows
+an approved entry with
 working apply/`.docx` links, an approved job appears there and nowhere
 else on the page, an approved entry survives outside
 `_LIST_WINDOW_DAYS`, and the section renders its empty-state message
@@ -547,12 +643,14 @@ of truth) but real disk clutter accumulating every test run since
 F1 shipped; worth scoping the output root into `QueueContext` (or a
 test fixture override) if it ever needs cleaning up for real.
 
-**Full suite: 511 collected, 506 passing, 5 failing (up from 504/504 --
-D48 added 7 net tests). The 5 failures are all in `test_batch.py`
+**Full suite: 532 collected, 527 passing, 5 failing (up from 511/506 --
+D49 added 21 net tests). The 5 failures are all in `test_batch.py`
 (`test_list_unscored_open_jobs_includes_open_unscored_job_in_window`
 and 4 others, a stale relative-date fixture unrelated to anything this
-checkpoint touched) and are pre-existing on `main` -- confirmed via
-`git stash` before writing this up, not assumed.** `ruff check src/
+checkpoint touched) and are pre-existing on `main` -- confirmed
+unchanged, not assumed, by re-running the full suite after this
+checkpoint's own changes and getting the identical 5-test set.**
+`ruff check src/
 tests/` clean; `ruff format --check` clean on every file this
 checkpoint touched (the pre-existing `RUF059`-adjacent formatting-only
 diffs in `test_db.py`/`test_db_migrate.py`/`test_profiles_brief.py`/
@@ -561,36 +659,78 @@ still untouched by this checkpoint's own edits).
 
 **`data/jobengine.db` real accumulated state, verified fresh this
 checkpoint via a read-only query (hard rule 13: this session made zero
-writes to the real db, D48 is a pure read path), not carried forward --
+writes to the real db -- every `migrate()` call this session ran
+against a scratch path only, see Known Issues), not carried forward --
 real usage kept moving the db between checkpoints again:** 15 companies
-(unchanged), 4854 jobs (up from 4755 -- real `sync` firings, none from
-this session's own work), 38 `runs` rows (up from 36), `relevance_scores`
-1029 rows/951 distinct jobs (unchanged), `job_analysis` 100 rows/86
-distinct jobs (up from 95/82 -- real reviews between checkpoints),
-`keyword_corpus` 232 rows (up from 222), `job_resume_variants`/
-`rubric_results` **18/18** (up from 4 -- real usage between checkpoints,
-none from this session), `applications` **8** (up from 4 -- real
-approvals between checkpoints; D48 itself wrote nothing to any of these
-tables, it only reads them), `gap_ledger` **101 rows** (up from 36 --
-real reviews between checkpoints), 4 `base_resumes` rows (unchanged,
-still doubly stale per D45/D47, not touched this session). D48's new
-"Approved" section on `GET /` now has 8 real rows to render against,
-not a synthetic count -- the disappearing-job problem it fixes was a
-real, current gap against this exact data, not a hypothetical. `daily_cap`
+(unchanged), 5007 jobs (up from 4854 -- real `sync` firings, none from
+this session's own work), 42 `runs` rows (up from 38), `relevance_scores`
+1064 rows/983 distinct jobs (up from 1029/951), `job_analysis` 127 rows/
+112 distinct jobs (up from 100/86 -- real reviews between checkpoints),
+`keyword_corpus` 303 rows (up from 232), `job_resume_variants`/
+`rubric_results` **20/20** (up from 18/18 -- real usage between
+checkpoints, none from this session's own work: this session made zero
+writes to the real db), `applications` **9** (up from 8), `gap_ledger`
+**116 rows** (up from 101), 4 `base_resumes` rows (unchanged, still
+doubly stale per D45/D47, not touched this session). `variant_claims`
+(D49's new table) **does not exist yet in the real db** -- confirmed by
+direct query, `sqlite_master` has no such row -- since `migrate()` has
+only been run against scratch copies this session; `schema_migrations`
+still shows only `0001_initial`/`0002_job_resume_variants_review_state`,
+not the new `0003_variant_claims`. `daily_cap`
 is still `null`; `min_relevance_score: 20` (D37) remains the only live
-relevance-score gate on `web/app.py`'s `_new_pairs()`; D40's seniority
+relevance-score gate on `pipeline/batch.py`'s `list_candidate_pairs()`
+(moved there this checkpoint from `web/app.py`'s old `_new_pairs()`,
+D49); D40's seniority
 exclusion is a second, independent gate upstream of it, in
-`passes_all_filters()`, not a relevance-score gate at all. Of the 951
-distinct scored jobs, 393 (41.3%) are `ats='ashby'` — G1 (D39) cannot
-classify any of them; D41 live-queried the more relevant number, the
-real approvable-queue population specifically (573 jobs passing every
-B3 filter + the relevance floor): **293 of those (51.1%) are
-`ats='ashby'`**, worse than the all-scored-jobs figure suggested.
+`passes_all_filters()`, not a relevance-score gate at all. Of the 983
+distinct scored jobs, the `ats='ashby'` fraction was not re-queried this
+checkpoint (unrelated to D49's scope); see D41 for the last real
+measurement (51.1% of the approvable-queue population specifically).
 
 ---
 
 ## Known issues and deferred work
 
+- **New this checkpoint (D49), blocking, needs a confirmed action before
+  the app runs for real:** the real `data/jobengine.db` is still on
+  schema version `0002` -- `variant_claims` (the new claim table) does
+  not exist there. This session's own `migrate()` calls only ever ran
+  against scratch copies, per hard rule 13; no confirmation was asked
+  for the real path. Running the real app or `pipeline/batch.py` against
+  the real db before `uv run python -m jobengine.db migrate` is run
+  there (with your explicit confirmation) will raise on the first call
+  to `claim_variant()`/`release_claim()`/`list_claims()` (`sqlite3.
+  OperationalError: no such table: variant_claims`). Purely additive
+  migration (no rebuild), verified idempotent against a scratch db this
+  session, but not yet applied for real.
+- **New this checkpoint (D49), not yet done:** `pipeline/batch.py`'s new
+  fourth stage (the render prefetch) has never been run live against the
+  real db -- only against `tmp_path` test dbs and mocked LLM clients.
+  D38 set the precedent of a real live catch-up run before trusting a
+  new batch stage unattended on Task Scheduler (13m28s, 158 real calls,
+  zero errors, confirmed before scheduling); D49's own cost projection
+  (~7-8 min for the current 41-pair backlog, ~1-2 min/day steady-state
+  after) is a projection from real measurements (D38's per-call latency,
+  a real timed PDF conversion this session), not a live-run confirmation
+  of this specific new code path. Do the real migration above first,
+  then a real live run, before relying on the scheduled entry.
+- **New this checkpoint (D49), a real, deliberate scope boundary, not an
+  oversight:** `ensure_reviewed()`'s own extraction step (the
+  `analyze_job()` call when `job_analysis` doesn't exist yet) is *not*
+  claim-protected -- only the ladder+insert step is. Two concurrent
+  calls for a pair with no `job_analysis` row yet can both trigger a
+  real extraction call before either reaches the claim; wasteful (one
+  real LLM call, zero-cost per hard rule 9 since it's local) but not
+  crash-prone, since `upsert_job_analysis()` is a real upsert, not an
+  insert-only path. Not fixed this checkpoint: it's a distinct, lesser
+  problem from the reported "UNIQUE constraint failed" crash this
+  session was asked to fix, and in the shipped design this path is
+  reached rarely in practice -- `pipeline/batch.py`'s own earlier
+  extraction stage already populates `job_analysis` for every
+  floor-clearing job before its new render stage ever calls
+  `ensure_reviewed()` on the same pair, so the on-demand web fallback
+  usually finds `job_analysis` already there. Worth a real fix if this
+  is ever actually hit at scale, not preemptively.
 - **New this checkpoint (D48), a real currently-broken test, found
   while confirming the full suite, not caused by D48:** 5 tests in
   `tests/test_batch.py` fail on `main` as of this checkpoint
@@ -1510,6 +1650,22 @@ B3 filter + the relevance floor): **293 of those (51.1%) are
 
 ## Decisions made during implementation
 
+- This checkpoint (D49): shape (b) -- extend `pipeline/batch.py`'s
+  existing scheduled orchestrator to prefetch resume renders, web app
+  reads only -- chosen over (a) background workers inside the web app,
+  after being put to you with reasons, not a default. Also confirmed:
+  the on-demand detail route returns a 202 wait/retry page rather than
+  blocking the request thread when it hits a claimed pair; the render
+  prefetch stage stays uncapped (matches `daily_cap: null`'s existing
+  philosophy, D23); `claimed_by` stays a debug-only column, not surfaced
+  in the UI. All three via `AskUserQuestion` before implementation.
+  Orphaned-claim recovery (a `claimed_at`-based staleness threshold,
+  `STALE_CLAIM_SECONDS = 600`, not a startup sweep) was asked for
+  explicitly by you as a required design answer, not left implicit.
+  Significant enough to also be recorded as D49 in docs/decisions.md,
+  including the real cost projection (41-pair backlog, ~6/day
+  steady-state, real measured per-call/PDF-conversion latencies) done
+  before proposing the uncapped default.
 - This checkpoint (D48): the new "Approved" section on `GET /` reads
   from `applications`, not `job_resume_variants.review_status =
   'approved'` -- confirmed by asking before writing any code.
@@ -1861,6 +2017,61 @@ B3 filter + the relevance floor): **293 of those (51.1%) are
 ## Session log
 
 (Newest first. Date, task id, what changed, what to do next.)
+
+- 2026-08-22, D49 (done, F1-followup, user-directed): "Score and
+  review" blocked the request thread on the full patch ladder (LLM
+  call, docx render, LibreOffice PDF conversion); a real double request
+  (reload mid-render, two tabs) made a genuine race routine, not rare --
+  "UNIQUE constraint failed: job_resume_variants.job_id, profile." Both
+  fixed together, as instructed, not race-first-then-design.
+  Diagnosed before any design: `ensure_reviewed()` was check-then-insert
+  with the expensive ladder in between; two concurrent callers for the
+  same pair both passed the check, both ran the ladder a second time
+  (including writing to the same output file paths, a silent corruption
+  risk beyond the DB crash), then raced the insert. Fixed via a new
+  `variant_claims` table (`PRIMARY KEY (job_id, profile)` is the mutex
+  itself) that `ensure_reviewed()` claims before rendering, re-checks
+  for an existing variant immediately after winning the claim (closes a
+  second, real gap: the prior claim-holder may have finished in
+  between), and always releases in a `finally`. Orphaned-claim recovery
+  -- asked for explicitly as a required design answer, not left to
+  "`finally` always fires" -- is a `claimed_at` staleness threshold
+  (`STALE_CLAIM_SECONDS = 600`, reasoned against real measured
+  latencies: ~5.1s/call from D38, a real ~0.8s PDF conversion timed live
+  this session), not a separate sweep process.
+  Two prefetch shapes were put to you with a recommendation and reasons,
+  not a default: (a) background workers in the web app, rejected (the
+  dev `--reload` workflow kills in-flight work and its status on every
+  reload); (b) extend `pipeline/batch.py`'s existing scheduled
+  orchestrator, chosen (already exists for this purpose, D38; already
+  incremental; the local model call is zero-cost). `batch.py` gained a
+  fourth stage prefetching every candidate pair's ladder,
+  `claimed_by="batch"`, sharing `ensure_reviewed()` with the web app's
+  fallback. `GET /`'s "not yet reviewed" table now shows Queued vs
+  Processing per pair, read from `variant_claims`/`job_resume_variants`
+  since shape (b) means status has to live in the db, not process
+  memory. Real cost projected before shipping (D38's own bar): 41 real
+  candidate pairs in the current backlog, ~6/day steady-state; ~7-8 min
+  added to the first run after this ships, ~1-2 min/day steady-state
+  after. Three explicit `AskUserQuestion` confirmations: 202 wait/retry
+  over blocking, uncapped render stage, `claimed_by` debug-only.
+  23 new tests, tests-first (`test_db.py` +8, `test_queue_orchestrate.py`
+  +5, `test_batch.py` +5, `test_web_app.py` +3). Full suite 532
+  collected / 527 passing, the same 5 pre-existing `test_batch.py`
+  failures already documented (stale relative-date fixture, unrelated),
+  confirmed unchanged. `ruff check`/`format` clean on every file
+  touched. Full writeup: D49, docs/decisions.md.
+  **Not done: the real `data/jobengine.db` is still on schema version
+  `0002`** -- every `migrate()` call this session was against a scratch
+  copy, per hard rule 13, no confirmation asked for the real path. The
+  code will raise against the real db until `uv run python -m
+  jobengine.db migrate` runs there with your explicit confirmation.
+  Next: run that migration (needs your go-ahead), then a real live run
+  of `pipeline/batch.py` against the real db before trusting it
+  unattended on Task Scheduler (same precedent D38 set for itself), then
+  watch whether the projected first-run/steady-state costs hold. Same
+  other open items as before D48 otherwise (see Current task above).
+  You're committing this session's changes yourself.
 
 - 2026-08-20, D48 (done): `GET /` gains a third "Approved" section,
   fixing the dead end where an approved job had no list view of its
